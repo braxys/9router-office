@@ -24,10 +24,10 @@ export function ControlDock() {
   return (
     <section
       aria-label="Simulation mode control dock"
-      className="toy-card pointer-events-auto w-full overflow-hidden"
+      className="toy-card pointer-events-auto flex max-h-[calc(100dvh-9rem)] w-full flex-col overflow-hidden"
     >
       {/* header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-card-border/70 px-4 py-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b-2 border-card-border/70 px-4 py-3">
         <div className="flex items-center gap-2.5">
           <span
             className={cn(
@@ -102,11 +102,22 @@ export function ControlDock() {
         </div>
       </header>
 
-      <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)]">
-        <MoodGrid />
+      {/*
+        Body layout exists because this dock is an absolutely positioned bottom
+        layer (`z-30`) while the top HUD cards are a separate `z-20` layer:
+        nothing in the layout flow stops a tall dock from painting over them, so
+        the dock caps its own height (`max-h` on the section) and the mood grid
+        scrolls inside it. The camera row is `shrink-0` so the presets stay on
+        screen instead of being pushed under the fold on a short phone.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3 sm:grid sm:flex-none sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)] sm:gap-3">
+        <div className="toy-scroll min-h-0 flex-1 overflow-y-auto sm:overflow-visible">
+          <MoodGrid />
+        </div>
         {/* Camera presets live in the panel from `lg` up; the dock is the only
-            place to reach them below it, and they are essential for demos. */}
-        <CameraMenu />
+            place to reach them below it, so it must keep them — compact keeps
+            the dock short enough to not crowd the mood grid. */}
+        <CameraMenu compact />
       </div>
     </section>
   );

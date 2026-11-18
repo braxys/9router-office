@@ -119,18 +119,17 @@ await send('Page.bringToFront');
 await send('Emulation.setFocusEmulationEnabled', { enabled: true });
 
 // Wait for the app shell to actually mount (first compile can take ~10s+)
-// instead of relying on a fixed sleep. The simulation controls are the
-// readiness signal, but *which* container renders them depends on the
-// breakpoint: the side panel at `lg`+, the bottom dock below it. Either one
-// proves the HUD mounted, and neither depends on copy staying in `innerText`.
+// instead of relying on a fixed sleep. The side panel's <aside> is the signal:
+// it is rendered by `CommandCenter` at every width (only its wrapper is
+// CSS-hidden below `lg`), so one selector works everywhere and nothing depends
+// on visible copy staying in `innerText`.
 const READY_TIMEOUT_MS = 45000;
 const readyStart = Date.now();
 let ready = false;
 while (Date.now() - readyStart < READY_TIMEOUT_MS) {
   try {
     ready = await evaluate(
-      `!!document.querySelector('aside[aria-label="Simulation panel"]') ||
-       !!document.querySelector('[aria-label="Simulation mode control dock"]')`,
+      `!!document.querySelector('aside[aria-label="Simulation panel"]')`,
     );
   } catch {
     ready = false;
@@ -166,11 +165,8 @@ const state = await evaluate(`(() => {
     })(),
     bootingVisible: text.includes('Booting spatial core'),
     hasTitle: text.includes('9Router'),
-    // Same readiness signal as above: the controls exist in exactly one of the
-    // two containers, and which one depends on the breakpoint.
-    hasSimMode:
-      !!document.querySelector('aside[aria-label="Simulation panel"]') ||
-      !!document.querySelector('[aria-label="Simulation mode control dock"]'),
+    // Same signal as the readiness loop: the panel <aside> is always mounted.
+    hasSimMode: !!document.querySelector('aside[aria-label="Simulation panel"]'),
     states: ['IDLE','THINKING','STREAMING','ERROR'].filter(s => text.includes(s)),
     buttonLabels: buttons.map(b => (b.textContent || '').trim()).filter(Boolean),
   };

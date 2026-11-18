@@ -90,7 +90,8 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
               aria-label={`Set ${broadcast ? 'all robots' : selected?.name ?? 'robot'} to ${meta.label}`}
               title={`${meta.label} — ${hint}  (key ${index + 1})`}
               className={cn(
-                'toy-btn group relative flex min-h-14 cursor-pointer flex-col justify-center gap-0.5 overflow-hidden px-2.5 py-2 text-left',
+                'toy-btn group relative flex min-h-14 cursor-pointer flex-col justify-center gap-0.5 overflow-hidden py-2 text-left',
+                compact ? 'px-2' : 'px-2.5',
                 (isActive || isFlashing) && 'animate-toy-pop',
               )}
               style={
@@ -103,7 +104,7 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
                   : undefined
               }
             >
-              <span className="flex min-w-0 items-center gap-1.5">
+              <span className={cn('flex min-w-0 items-center', compact ? 'gap-1' : 'gap-1.5')}>
                 <span
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
                   style={{ backgroundColor: `${meta.color}26` }}
@@ -118,14 +119,18 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
                 <span className="min-w-0 truncate text-[11px] font-extrabold tracking-wide text-ink-strong uppercase">
                   {meta.label}
                 </span>
-                {/* The panel is 320px wide, so a compact cell has no room for
-                    both the full status word and the shortcut badge. The label
-                    is the primary affordance, so the badge yields. */}
-                {!compact && (
-                  <kbd className="ml-auto rounded bg-card-soft px-1 text-[10px] font-bold text-ink-dim">
-                    {index + 1}
-                  </kbd>
-                )}
+                {/* Compact (panel) cells fit both the status word and the badge
+                    at `px-2`/`gap-1`, so the badge always renders there — the
+                    design calls for icon + label + key. In the dock a 320px
+                    phone leaves the label ~52px, so the badge waits for `sm`. */}
+                <kbd
+                  className={cn(
+                    'ml-auto rounded bg-card-soft px-1 text-[10px] font-bold text-ink-dim',
+                    !compact && 'hidden sm:block',
+                  )}
+                >
+                  {index + 1}
+                </kbd>
               </span>
               {!compact && (
                 <span className="truncate text-[10px] font-medium text-ink-dim">
