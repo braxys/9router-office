@@ -65,11 +65,13 @@ export function CommandCenter() {
 
           They share one absolutely positioned, wrapping flex row because the
           dock's height changes with the viewport (it wraps), so only the
-          browser can keep the two from colliding at every width. From `lg` up
-          the dock is gone and this leaves the spotlight alone at bottom-left.
+          browser can keep the two from colliding at every width. The spotlight
+          is `xl:block` because at 768-1279px it is tall enough to reach the
+          identity card when the dock is also in this strip; from `xl` up the
+          dock is gone and it sits alone at bottom-left.
         */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-wrap items-end justify-start gap-3 px-3 pb-3 sm:gap-4 sm:px-5 sm:pb-4">
-          <div className="pointer-events-auto hidden w-[min(90vw,280px)] shrink-0 md:block">
+          <div className="pointer-events-auto hidden w-[min(90vw,280px)] shrink-0 xl:block">
             <RobotSpotlightCard />
           </div>
 

@@ -10,6 +10,9 @@ import { cn } from '@/lib/format';
  *
  * Picking a row only moves `selectedAgentId`; every mood trigger reads that
  * selection, so this list is the panel's "who am I talking to" control.
+ *
+ * No height cap: every provider in the office must be reachable without a
+ * nested scroll, and the panel already scrolls as a whole.
  */
 export function ProviderPicker() {
   const agents = useAgentStore((s) => s.agents);
@@ -21,7 +24,7 @@ export function ProviderPicker() {
       <p className="mb-2 text-[11px] font-bold tracking-wide text-ink-dim uppercase">
         Pilih provider
       </p>
-      <div className="toy-scroll grid max-h-[104px] gap-1 overflow-y-auto pr-1">
+      <div className="grid gap-1">
         {agents.map((agent) => {
           const meta = STATUS_META[agent.status];
           const isSelected = agent.id === selectedAgentId;

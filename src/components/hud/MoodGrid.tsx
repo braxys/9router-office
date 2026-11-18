@@ -118,9 +118,14 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
                 <span className="min-w-0 truncate text-[11px] font-extrabold tracking-wide text-ink-strong uppercase">
                   {meta.label}
                 </span>
-                <kbd className="ml-auto rounded bg-card-soft px-1 text-[10px] font-bold text-ink-dim">
-                  {index + 1}
-                </kbd>
+                {/* The panel is 320px wide, so a compact cell has no room for
+                    both the full status word and the shortcut badge. The label
+                    is the primary affordance, so the badge yields. */}
+                {!compact && (
+                  <kbd className="ml-auto rounded bg-card-soft px-1 text-[10px] font-bold text-ink-dim">
+                    {index + 1}
+                  </kbd>
+                )}
               </span>
               {!compact && (
                 <span className="truncate text-[10px] font-medium text-ink-dim">

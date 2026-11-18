@@ -4,6 +4,7 @@ import { Pause, Play, RotateCcw, Sparkles } from 'lucide-react';
 import { useAgentStore } from '@/store/useAgentStore';
 import { playConfirm, playToggle } from '@/lib/audio';
 import { cn } from '@/lib/format';
+import { CameraMenu } from './CameraMenu';
 import { ModelToggle } from './ModelToggle';
 import { MoodGrid } from './MoodGrid';
 import { SoundToggle } from './SoundToggle';
@@ -101,8 +102,11 @@ export function ControlDock() {
         </div>
       </header>
 
-      <div className="px-4 py-3">
+      <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)]">
         <MoodGrid />
+        {/* Camera presets live in the panel from `lg` up; the dock is the only
+            place to reach them below it, and they are essential for demos. */}
+        <CameraMenu />
       </div>
     </section>
   );

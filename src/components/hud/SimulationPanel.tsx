@@ -28,14 +28,6 @@ export function SimulationPanel() {
       aria-label="Simulation panel"
       className="toy-card toy-scroll flex max-h-[calc(100dvh-2rem)] w-[320px] shrink-0 flex-col gap-3 overflow-y-auto p-3"
     >
-      {/*
-        Screen-reader-only name for the panel. The dock that used to carry the
-        words "Simulation Mode" is `display:none` from `lg` up, so this keeps
-        that name (and the readiness probe in `npm run smoke`) available at
-        every width without adding a visible heading the panel does not need.
-      */}
-      <h2 className="sr-only">Simulation Mode</h2>
-
       <ProviderPicker />
       <CameraMenu />
       <MoodGrid compact />
