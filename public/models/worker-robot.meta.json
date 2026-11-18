@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-18T06:03:43.848Z",
+  "rootOrigin": "seat",
+  "rootName": "WorkerRobot",
+  "nodeNames": [
+    "root",
+    "torso",
+    "head",
+    "antenna",
+    "armL",
+    "armR"
+  ],
+  "partCount": 30,
+  "heightMetres": 2.365
+}
