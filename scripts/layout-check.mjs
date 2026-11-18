@@ -6,10 +6,13 @@
 //   2. exactly one control surface is visible — the side panel at >= 1024px,
 //      the dock below it — never both, never neither;
 //   3. the panel never overlaps Office Vitals, the identity card or Robot
-//      Spotlight;
+//      Spotlight — and the spotlight card exists exactly at `xl` and up, so
+//      the overlap check can never go vacuous by the card disappearing;
 //   4. nothing inside the panel clips vertically (the `ProviderPicker` max-h
 //      bug that hid the 4th provider) or horizontally (the `STREAMING` label
-//      bug), and the four mood labels are never truncated;
+//      bug), the four mood labels are never truncated, and the panel itself
+//      either fits its box or scrolls — the footer's controls (Pause / Reset /
+//      Sound / Model) are only reachable through that scroll;
 //   5. all provider rows are visible in the panel without scrolling;
 //   6. the dock never overlaps the top HUD and keeps its header on screen;
 //   7. all three camera presets are visible and enabled, and all four mood
@@ -26,6 +29,11 @@ const URL = process.env.TARGET_URL ?? 'http://localhost:3001/?capture=1';
 
 /** Tailwind `lg`: the side panel takes over from here, the dock below it. */
 const LG = 1024;
+/**
+ * Tailwind `xl`: `CommandCenter` renders `RobotSpotlightCard` only from here up
+ * (`xl:block`). Below it the spotlight would reach the identity card.
+ */
+const XL = 1280;
 
 /**
  * Phone widths and short landscape sizes that already produced bugs, both
@@ -316,6 +324,11 @@ const probe = `(() => {
     : [];
 
   const dockHeader = dockVisible ? dock.querySelector('header') : null;
+  // The panel's footer holds Pause / Reset / Sound / Model. At short viewports
+  // the panel is taller than its box and the footer sits below the visible
+  // area, so its only path to the user is the panel's own overflow-y-auto.
+  // Non-strict on purpose: that scroll *is* a legitimate path.
+  const panelFooter = panelVisible ? panel.querySelector('footer') : null;
 
   return {
     vw: innerWidth,
@@ -329,7 +342,9 @@ const probe = `(() => {
           ...rect(panel),
           scrollHeight: panel.scrollHeight,
           clientHeight: panel.clientHeight,
+          overflowY: css(panel).overflowY,
           reach: reachable(panel, true),
+          footer: panelFooter ? { ...rect(panelFooter), reach: reachable(panelFooter) } : null,
         }
       : null,
     dock: dockVisible
@@ -434,6 +449,20 @@ for (const { w, h } of VIEWPORTS) {
   }
   if (!d.vitals) problems.push('Office Vitals card not found');
   if (!d.identity) problems.push('identity card not found');
+  // Presence by breakpoint, mirroring `CommandCenter`'s `xl:block` wrapper.
+  // Without this the overlap checks above are vacuous whenever the card is
+  // missing: overlapSize(panel, null) is null, so the loop body never runs.
+  // From `xl` up the card must exist; below it, its absence is the fix for the
+  // 4px identity-card overlap, so an unexpected appearance is a failure too.
+  if (w >= XL && !d.spotlight) {
+    problems.push(`Robot spotlight card not found at xl+ (w>=${XL})`);
+  }
+  if (w < XL && d.spotlight) {
+    problems.push(
+      `Robot spotlight card unexpectedly present below xl (w=${w} < ${XL}) ` +
+        `x${d.spotlight.left}-${d.spotlight.right} y${d.spotlight.top}-${d.spotlight.bottom}`,
+    );
+  }
 
   // 4. Nothing inside the panel clips.
   for (const c of d.panelClipping.vertical) {
@@ -441,6 +470,31 @@ for (const { w, h } of VIEWPORTS) {
   }
   for (const c of d.panelClipping.horizontal) {
     problems.push(`PANEL HORIZONTAL CLIP ${c.tag} "${c.text}" scrollW ${c.scroll} > clientW ${c.client}`);
+  }
+  // 4b. The panel's own scroll contract. `scanClipping` walks
+  // `root.querySelectorAll('*')`, which excludes the aside itself, and the
+  // footer's own scrollHeight/clientHeight are equal — so an aside that grows
+  // past its box and cannot scroll is invisible to every check above. Mirror
+  // the dock's DOCK CLIPS ITS CONTENT rule: overflow is fine *iff* it scrolls.
+  if (d.panel) {
+    const scrollable = d.panel.overflowY === 'auto' || d.panel.overflowY === 'scroll';
+    if (d.panel.scrollHeight > d.panel.clientHeight + 1 && !scrollable) {
+      problems.push(
+        `PANEL CLIPS ITS CONTENT scrollH ${d.panel.scrollHeight} > clientH ${d.panel.clientHeight} ` +
+          `overflowY ${d.panel.overflowY}`,
+      );
+    }
+    // The footer is the only route to Pause / Reset / Sound / Model; assert it
+    // is reachable *through* the panel's own scroll (non-strict), so a clipped
+    // footer can never ship green.
+    if (!d.panel.footer) {
+      problems.push('PANEL footer not found');
+    } else if (!d.panel.footer.reach.ok) {
+      problems.push(
+        `PANEL FOOTER UNREACHABLE ${describeReach(d.panel.footer.reach)} ` +
+          `(panel scrollH ${d.panel.scrollHeight}/clientH ${d.panel.clientHeight} overflowY ${d.panel.overflowY})`,
+      );
+    }
   }
 
   // 5. Every provider row visible in the panel without scrolling it.
@@ -515,7 +569,7 @@ for (const { w, h } of VIEWPORTS) {
   if (!ok) failures++;
 
   const surfaceText = d.panel
-    ? `panel=on[${d.panel.left}-${d.panel.right},${d.panel.top}-${d.panel.bottom} sh${d.panel.scrollHeight}/ch${d.panel.clientHeight}]`
+    ? `panel=on[${d.panel.left}-${d.panel.right},${d.panel.top}-${d.panel.bottom} sh${d.panel.scrollHeight}/ch${d.panel.clientHeight} ovY=${d.panel.overflowY} footer=${d.panel.footer ? `${d.panel.footer.top}-${d.panel.footer.bottom}` : 'none'}]`
     : d.dock
       ? `dock=on[${d.dock.left}-${d.dock.right},${d.dock.top}-${d.dock.bottom} sh${d.dock.scrollHeight}/ch${d.dock.clientHeight}]`
       : 'panel=off dock=off';
