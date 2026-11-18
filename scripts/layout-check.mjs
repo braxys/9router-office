@@ -115,29 +115,83 @@ const probe = `(() => {
   const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
 
   /**
-   * The box the user can actually see this element in: the viewport narrowed
-   * by every ancestor that clips. A scroll container is not a limit — its
-   * content is reachable by scrolling, which is what it exists for — so only
-   * non-scrollable clipping ancestors can make an element unreachable.
+   * The box the user can actually see this element in: scroll, then clamp,
+   * then restore.
    *
-   * The strict flag ignores that exemption: it is the "visible right now,
-   * without touching anything" test used for controls that must never need a
-   * scroll.
+   * Non-strict, the three steps are literal. 1. Scroll: walking outwards, every
+   * clipping ancestor that really scrolls the axis the element overflows is
+   * scrolled by the minimum delta that brings the element inside its client
+   * box, and the previous scrollTop/scrollLeft are remembered. 2. Clamp: the
+   * visible box is the viewport narrowed by every clipping ancestor that is not
+   * a usable scroller for this element — either because it does not scroll that
+   * axis at all, or because it scrolls it but the trial scroll still could not
+   * fit the element in (content beyond its scroll range). A scroller is thus a
+   * path rather than a limit, including one nested inside an overflow-hidden
+   * box, which is exactly the dock: the section clips, the mood pane inside it
+   * scrolls, and the cells are reachable through the pane. 3. Restore: every
+   * touched scroller is put back in a finally, innermost first, so no probe can
+   * leave the page scrolled for the next measurement.
+   *
+   * Strict skips steps 1 and 3 entirely and clamps at every clipping ancestor:
+   * no scrolling, nothing touched. That is the "visible right now" test used for
+   * controls that must never need a scroll.
+   *
+   * rect is the element box measured between steps 1 and 3, i.e. in the same
+   * state the bounds describe, so describeReach compares like with like.
    */
   const reachable = (el, strict) => {
-    const r = el.getBoundingClientRect();
-    let top = 0, bottom = innerHeight, left = 0, right = innerWidth;
-    for (let a = el.parentElement; a; a = a.parentElement) {
-      if (!clips(a)) continue;
-      const ar = a.getBoundingClientRect();
-      if (strict || !scrollsY(a)) { top = Math.max(top, ar.top); bottom = Math.min(bottom, ar.bottom); }
-      if (strict || !scrollsX(a)) { left = Math.max(left, ar.left); right = Math.min(right, ar.right); }
+    const touched = [];
+    try {
+      if (!strict) {
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          if (!clips(a)) continue;
+          const ay = scrollsY(a);
+          const ax = scrollsX(a);
+          if (!ay && !ax) continue;
+          const r = el.getBoundingClientRect();
+          const ar = a.getBoundingClientRect();
+          let dy = 0, dx = 0;
+          if (ay) {
+            if (r.top < ar.top) dy = r.top - ar.top;
+            else if (r.bottom > ar.bottom) dy = r.bottom - ar.bottom;
+          }
+          if (ax) {
+            if (r.left < ar.left) dx = r.left - ar.left;
+            else if (r.right > ar.right) dx = r.right - ar.right;
+          }
+          if (!dy && !dx) continue;
+          touched.push([a, a.scrollTop, a.scrollLeft]);
+          a.scrollTop += dy;
+          a.scrollLeft += dx;
+        }
+      }
+      const r = el.getBoundingClientRect();
+      let top = 0, bottom = innerHeight, left = 0, right = innerWidth;
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        if (!clips(a)) continue;
+        const ar = a.getBoundingClientRect();
+        // A scroller is exempt only on an axis it actually scrolls *and* on
+        // which the trial scroll did put the element inside it. One that cannot
+        // reach its own content (content taller than its scroll range) is still
+        // a limit, so the gate can never pass an element nobody can see.
+        const fitsY = r.top >= ar.top - TOL && r.bottom <= ar.bottom + TOL;
+        const fitsX = r.left >= ar.left - TOL && r.right <= ar.right + TOL;
+        if (strict || !scrollsY(a) || !fitsY) { top = Math.max(top, ar.top); bottom = Math.min(bottom, ar.bottom); }
+        if (strict || !scrollsX(a) || !fitsX) { left = Math.max(left, ar.left); right = Math.min(right, ar.right); }
+      }
+      return {
+        ok: r.top >= top - TOL && r.bottom <= bottom + TOL && r.left >= left - TOL && r.right <= right + TOL,
+        top: px(top), bottom: px(bottom), left: px(left), right: px(right),
+        rect: rect(el),
+      };
+    } finally {
+      // Restore innermost-first. Each restore is individually guarded so one
+      // failure cannot leave the rest of the page scrolled (and cannot mask an
+      // error thrown by the walk itself).
+      for (const [a, st, sl] of touched.reverse()) {
+        try { a.scrollTop = st; a.scrollLeft = sl; } catch {}
+      }
     }
-    return {
-      ok: r.top >= top - TOL && r.bottom <= bottom + TOL && r.left >= left - TOL && r.right <= right + TOL,
-      top: px(top), bottom: px(bottom), left: px(left), right: px(right),
-      rect: rect(el),
-    };
   };
 
   const intersects = (a, b) =>
@@ -210,7 +264,7 @@ const probe = `(() => {
     return {
       name: button.getAttribute('aria-label'),
       // Mood cells may live in a scroller (the dock on a short phone), so a
-      // scrollable ancestor is an acceptable path to them.
+      // scrollable ancestor is an acceptable path to them — see reachable().
       reach: reachable(button, false),
       labelSpan: span
         ? { text: text(span), scroll: span.scrollWidth, client: span.clientWidth }
