@@ -78,6 +78,19 @@ function send(method, params = {}) {
   return new Promise((resolve) => pending.set(msgId, { resolve }));
 }
 
+// The mood cells run `animate-toy-pop`, a 1.04 scale that inflates the box
+// `getBoundingClientRect()` reports (153.5px -> 160.8px, 61 -> 63.9px) while it
+// runs. A transform cannot move anything in the layout flow, so the settled box
+// is the true layout box — but the assertions below compare those inflated
+// rectangles against 1px tolerances, so a purely visual effect could fail a page
+// that is actually correct. Measure with motion reduced and the noise is gone;
+// the app already honours the preference (globals.css). Per-session, and it
+// survives setDeviceMetricsOverride, so once before the first navigation is
+// enough. No cleanup needed: this script closes the socket on the way out.
+await send('Emulation.setEmulatedMedia', {
+  features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+});
+
 await send('Page.navigate', { url: URL });
 await delay(3000);
 
