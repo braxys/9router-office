@@ -103,15 +103,24 @@ export function ControlDock() {
       </header>
 
       {/*
-        Body layout exists because this dock is an absolutely positioned bottom
-        layer (`z-30`) while the top HUD cards are a separate `z-20` layer:
-        nothing in the layout flow stops a tall dock from painting over them, so
-        the dock caps its own height (`max-h` on the section) and the mood grid
-        scrolls inside it. The camera row is `shrink-0` so the presets stay on
-        screen instead of being pushed under the fold on a short phone.
+        This dock is an absolutely positioned bottom layer (`z-30`) while the
+        top HUD cards are a separate `z-20` layer, so nothing in the layout flow
+        stops a tall dock from painting over them: the section caps its own
+        height and the overflow has to be absorbed in here.
+
+        That cap can bind at any width — a short landscape window (768x320) hits
+        it exactly like a phone does — so the body must stay a shrinkable
+        `flex-1` item at every breakpoint, and the mood grid must keep its own
+        scroller there too. A body that held its content height would push the
+        overflow past the cap, where `overflow-hidden` on the section turns it
+        into a clipped region with no scroll path and the lower mood cells
+        become unreachable.
+
+        The camera presets need no such protection: they are a sibling grid item
+        outside the mood scroller, so scrolling the mood grid never moves them.
       */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3 sm:grid sm:flex-none sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)] sm:gap-3">
-        <div className="toy-scroll min-h-0 flex-1 overflow-y-auto sm:overflow-visible">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)] sm:grid-rows-[minmax(0,1fr)] sm:gap-3">
+        <div className="toy-scroll min-h-0 flex-1 overflow-y-auto">
           <MoodGrid />
         </div>
         {/* Camera presets live in the panel from `lg` up; the dock is the only
