@@ -23,8 +23,8 @@ interface TelemetryResponse {
  *   9Router comes back      -> simulation OFF again, unless the user had
  *                              already chosen simulation before the outage
  *
- * A manual trigger switches simulation on (see `ControlDock`), so the next
- * poll cannot erase a demo mid-performance.
+ * A manual trigger switches simulation on (see `triggerMood` in the store), so
+ * the next poll cannot erase a demo mid-performance.
  *
  * Mounted once from `CommandCenter`; renders nothing.
  */

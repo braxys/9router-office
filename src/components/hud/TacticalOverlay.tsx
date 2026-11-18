@@ -97,10 +97,10 @@ function StatusPill({ status }: { status: AgentStatus }) {
 /**
  * Bottom-left telemetry card.
  *
- * Rendered by `CommandCenter` as a sibling of the control dock rather than
- * absolutely positioned here: the dock's height changes with the viewport
- * (223px wide, ~420px at 768px), so the two can only avoid colliding if the
- * browser lays them out together.
+ * Rendered by `CommandCenter` inside the scene column's bottom strip. The dock
+ * (`< lg` only) shares that strip, so the browser lays the two out together:
+ * the dock's height changes with the viewport (it wraps), so a hard-coded
+ * offset could not keep them apart at every width.
  */
 export function RobotSpotlightCard() {
   const agents = useAgentStore((s) => s.agents);
@@ -179,7 +179,7 @@ export function RobotSpotlightCard() {
   );
 }
 
-/** Bottom-right event log; sibling of the dock for the same reason as above. */
+/** Mood-change log; lives in the `SimulationPanel` (`lg` and up). */
 export function MoodLogCard() {
   const transitions = useAgentStore((s) => s.transitions);
 

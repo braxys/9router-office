@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { AGENT_CONFIGS, STATUS_META } from '@/lib/agents';
+import { useUiStore } from '@/store/useUiStore';
 import type { AgentStatus, AgentTelemetry } from '@/lib/types';
 
 export interface TransitionEntry {
@@ -18,10 +19,23 @@ interface AgentStore {
   agents: AgentTelemetry[];
   selectedAgentId: string;
   simulationMode: boolean;
+  /**
+   * `broadcast` belongs to the store, not to a component: the mood grid is
+   * rendered by both `SimulationPanel` (lg+) and `ControlDock` (<lg), and a
+   * per-instance copy let the two disagree about who a trigger was aimed at.
+   */
+  broadcast: boolean;
   transitions: TransitionEntry[];
   eventCounter: number;
   selectAgent: (id: string) => void;
   setSimulationMode: (enabled: boolean) => void;
+  toggleBroadcast: () => void;
+  /**
+   * The single mood-trigger path: the grid buttons and the 1..4 keyboard
+   * shortcuts both call it, so the status write and the visual feedback cannot
+   * land on different components.
+   */
+  triggerMood: (status: AgentStatus) => void;
   setStatus: (
     agentId: string,
     status: AgentStatus,
@@ -174,10 +188,17 @@ function metricsForStatus(status: AgentStatus): Pick<
   }
 }
 
+/**
+ * The flash timeout lives outside the stores so a rapid second trigger cannot be
+ * cleared early by the first trigger's pending timer.
+ */
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+
 export const useAgentStore = create<AgentStore>()((set, get) => ({
   agents: buildInitialAgents(),
   selectedAgentId: AGENT_CONFIGS[0].id,
   simulationMode: true,
+  broadcast: false,
   transitions: [],
   eventCounter: 0,
 
@@ -188,6 +209,31 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
   },
 
   setSimulationMode: (enabled) => set({ simulationMode: enabled }),
+
+  toggleBroadcast: () => set((state) => ({ broadcast: !state.broadcast })),
+
+  triggerMood: (status) => {
+    const { agents, broadcast, selectedAgentId, setAllStatuses, setSimulationMode, setStatus } =
+      get();
+    // Manual play pauses the live feed, otherwise the next poll erases it.
+    setSimulationMode(true);
+    if (broadcast) {
+      setAllStatuses(status, 'manual');
+    } else {
+      const selected = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
+      if (selected) setStatus(selected.id, status, 'manual');
+    }
+
+    // Feedback is presentation, so it belongs to the UI store; the timer is
+    // module-scoped so a rapid second trigger restarts it instead of letting the
+    // first one clear the new flash.
+    useUiStore.getState().setFlash(status);
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      flashTimer = undefined;
+      useUiStore.getState().setFlash(null);
+    }, 480);
+  },
 
   setStatus: (agentId, status, source = 'manual') => {
     const state = get();

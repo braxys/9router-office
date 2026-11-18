@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { Coffee, Lightbulb, Send, Siren, Sparkles } from 'lucide-react';
 import { useAgentStore } from '@/store/useAgentStore';
+import { useUiStore } from '@/store/useUiStore';
 import { playClick, playToggle } from '@/lib/audio';
 import { MANUAL_STATUSES, STATUS_META } from '@/lib/agents';
 import { cn } from '@/lib/format';
@@ -32,35 +32,12 @@ const STATUS_HINT: Record<AgentStatus, string> = {
 export function MoodGrid({ compact = false }: { compact?: boolean }) {
   const agents = useAgentStore((s) => s.agents);
   const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
-  const setStatus = useAgentStore((s) => s.setStatus);
-  const setAllStatuses = useAgentStore((s) => s.setAllStatuses);
-  const setSimulationMode = useAgentStore((s) => s.setSimulationMode);
-
-  const [broadcast, setBroadcast] = useState(false);
-  const [flash, setFlash] = useState<AgentStatus | null>(null);
+  const broadcast = useAgentStore((s) => s.broadcast);
+  const flash = useUiStore((s) => s.flash);
+  const toggleBroadcast = useAgentStore((s) => s.toggleBroadcast);
+  const triggerMood = useAgentStore((s) => s.triggerMood);
 
   const selected = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
-
-  const trigger = useCallback(
-    (status: AgentStatus) => {
-      // Manual play pauses the live feed, otherwise the next poll erases it.
-      setSimulationMode(true);
-      if (broadcast) {
-        setAllStatuses(status, 'manual');
-      } else if (selected) {
-        setStatus(selected.id, status, 'manual');
-      }
-      setFlash(status);
-      playClick();
-    },
-    [broadcast, selected, setAllStatuses, setSimulationMode, setStatus],
-  );
-
-  useEffect(() => {
-    if (!flash) return;
-    const timer = window.setTimeout(() => setFlash(null), 480);
-    return () => window.clearTimeout(timer);
-  }, [flash]);
 
   return (
     <section aria-label="Trigger a mood" className="min-w-0">
@@ -71,7 +48,7 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
         <button
           type="button"
           onClick={() => {
-            setBroadcast((v) => !v);
+            toggleBroadcast();
             playToggle();
           }}
           aria-pressed={broadcast}
@@ -106,7 +83,10 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
             <button
               key={status}
               type="button"
-              onClick={() => trigger(status)}
+              onClick={() => {
+                triggerMood(status);
+                playClick();
+              }}
               aria-label={`Set ${broadcast ? 'all robots' : selected?.name ?? 'robot'} to ${meta.label}`}
               title={`${meta.label} — ${hint}  (key ${index + 1})`}
               className={cn(

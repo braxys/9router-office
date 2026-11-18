@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import type { AgentStatus } from '@/lib/types';
 
 /**
  * Presentation-only preferences: sound and the opt-in `.glb` model.
@@ -31,6 +32,16 @@ export interface UiPrefs {
 interface UiStore extends UiPrefs {
   /** Set when a model failed to load, so the HUD can explain and revert. */
   modelError: string | null;
+  /**
+   * Status whose pop animation is currently playing, or `null`.
+   *
+   * Lives here rather than in `useAgentStore` because it is feedback, not
+   * telemetry: the mood grid reads it to animate the button a trigger just hit.
+   * Both grids are mounted (one per breakpoint), so it cannot be local state —
+   * a 1..4 keypress must light up the grid that is actually on screen.
+   */
+  flash: AgentStatus | null;
+  setFlash: (status: AgentStatus | null) => void;
   /**
    * agentId -> the exact `lastError` text the user closed.
    *
@@ -88,6 +99,9 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   ...DEFAULTS,
   modelError: null,
   dismissedErrors: {},
+  flash: null,
+
+  setFlash: (status) => set({ flash: status }),
 
   setSoundEnabled: (enabled) => {
     set({ soundEnabled: enabled });
