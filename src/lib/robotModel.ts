@@ -22,14 +22,16 @@
 /**
  * Palette keys instead of raw hex, so a recolour is one edit.
  *
- * `body`, `limb` and `accent` are per-agent: they resolve from the agent's
- * `accentColor` at runtime. `limb` is that colour darkened, exactly as the
- * original hand-written rig computed it.
+ * `body`, `limb`, `accent` and `accent2` are per-agent: they resolve from the
+ * agent's identity colour at runtime. `limb` is that colour darkened, exactly as
+ * the original hand-written rig computed it; `accent2` is the identity's second
+ * brand colour (see `RobotParts`, which supplies it per part).
  */
 export type PaletteKey =
   | 'body'
   | 'limb'
   | 'accent'
+  | 'accent2'
   | 'cream'
   | 'ink'
   | 'blush'
@@ -39,7 +41,13 @@ export type PaletteKey =
   | 'white'
   | 'yellow';
 
-export const ROBOT_COLORS: Record<Exclude<PaletteKey, 'body' | 'limb' | 'accent'>, string> = {
+/** A literal brand colour, e.g. `#2A2A33`. Passed through untouched. */
+export type HexColor = `#${string}`;
+
+export const ROBOT_COLORS: Record<
+  Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'accent2'>,
+  string
+> = {
   cream: '#fdfbf6',
   ink: '#3a4a58',
   blush: '#ffb4c0',
@@ -59,16 +67,25 @@ export const LIMB_DARKEN = 0.82;
 /**
  * Resolves a palette key to a hex colour for one agent.
  * Pure and allocation-light; safe to call during render.
+ *
+ * A hex literal is its own answer — that is how an identity paints a part in a
+ * second brand colour without a palette key per provider.
  */
-export function resolveRobotColor(key: PaletteKey, accent: string): string {
+export function resolveRobotColor(key: PaletteKey | HexColor, accent: string): string {
+  if (key.startsWith('#')) return key;
   switch (key) {
     case 'body':
     case 'accent':
+    // `accent2` is the identity's second brand colour. Only `RobotParts` knows
+    // it, and it passes it as `accent` for those parts; a caller that has no
+    // second colour (the `.glb` generator, which never renders identity parts)
+    // gets the body colour rather than a missing key.
+    case 'accent2':
       return accent;
     case 'limb':
       return darkenHex(accent, LIMB_DARKEN);
     default:
-      return ROBOT_COLORS[key];
+      return ROBOT_COLORS[key as Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'accent2'>];
   }
 }
 
@@ -142,7 +159,7 @@ export interface RobotPart {
   position: readonly [number, number, number];
   /** Euler XYZ radians. */
   rotation?: readonly [number, number, number];
-  color: PaletteKey;
+  color: PaletteKey | HexColor;
   /** `true` renders with `MeshBasicMaterial` (self-lit, ignores lighting). */
   unlit?: boolean;
   /** Cylinder radii / sphere radius. */
@@ -384,6 +401,1304 @@ export const ANTENNA_BALL = {
 } as const;
 
 /* -------------------------------------------------------------------------- */
+/*  Identity shapes                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The head silhouette. `box` is the plain cranium every bot has; the others add
+ * blocks around it, so one neutral `.glb` stays valid for all of them.
+ */
+export type ShellId = 'box' | 'cat' | 'arch' | 'hex' | 'pixel' | 'round' | 'manga';
+
+/**
+ * What sits on the antenna. `ball` is the original yellow sphere and is drawn by
+ * the rig itself (it pulses), so its table entry is empty.
+ */
+export type TopperId =
+  | 'ball'
+  | 'catface'
+  | 'arch'
+  | 'knot'
+  | 'sparkle'
+  | 'pixelK'
+  | 'eye'
+  | 'nfringe'
+  | 'terminal'
+  | 'router'
+  | 'burst'
+  | 'openai'
+  | 'llama';
+
+/** The chest badge. Every topper doubles as one, except the ball. */
+export type EmblemId = Exclude<TopperId, 'ball'> | 'none';
+
+/**
+ * Head-space envelope a shell may occupy. The cranium is 0.78 x 0.6 x 0.54, so
+ * this leaves ~0.17 m of reach on each side and ~0.32 m above: enough for a bold
+ * outline, not enough to poke into the chest or the neighbouring desk.
+ */
+export const SHELL_ENVELOPE = {
+  min: [-0.56, -0.42, -0.32] as const,
+  max: [0.56, 0.62, 0.32] as const,
+};
+
+/**
+ * Antenna-space envelope for a topper: x +-0.11, y 0.24..0.51, z +-0.06.
+ *
+ * The ceiling is load-bearing. `ANTENNA_BALL` already reaches y = 0.385 here, and
+ * `ROBOT_ENVELOPE_TOP` (= 2.09 m in root space) is what lifts the name pill clear
+ * of the tallest topper. Raising it clips the pill on short viewports.
+ */
+export const TOPPER_ENVELOPE = {
+  min: [-0.11, 0.24, -0.06] as const,
+  max: [0.11, 0.51, 0.06] as const,
+};
+
+/**
+ * Torso-space envelope for an emblem: the cream belly panel's own slab, plus a
+ * little room in front of it.
+ *
+ * The panel spans z 0.243..0.263, so the back limit is the panel's back face —
+ * an emblem that starts behind it would be buried inside the chest. The front
+ * limit keeps the badge from floating off the body.
+ */
+export const EMBLEM_ENVELOPE = {
+  min: [-0.24, 0.235, 0.243] as const,
+  max: [0.24, 0.565, 0.28] as const,
+};
+
+/**
+ * Head shells, relative to the `head` node.
+ *
+ * Every entry is *additive*: the cranium, face plate and ear bolts stay exactly
+ * where they are, and these blocks grow the silhouette around them. That is what
+ * lets one neutral `.glb` serve every identity — the shell is mounted at runtime.
+ *
+ * Authoring rules, both enforced by `npm run identity:test`:
+ *   - stay inside `SHELL_ENVELOPE`;
+ *   - never enter the face box (`FACE`, grown 5 mm). The face is the animation
+ *     surface for all four statuses and must stay uncovered from every angle.
+ *
+ * Where the boldness comes from: a feature reads at overview size only if it
+ * changes the outline by ~15% of the head's width. Chamfers alone do not.
+ */
+export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
+  /** The body the office shipped with: no shell at all. */
+  box: [],
+
+  /** CodeBuddy: two cat ears. The outline gain is entirely in the ears. */
+  cat: [
+    {
+      id: 'shellEarL',
+      node: 'head',
+      shape: 'box',
+      size: [0.16, 0.3, 0.16],
+      position: [-0.26, 0.42, 0],
+      rotation: [0, 0, 0.35],
+      color: 'accent2',
+    },
+    {
+      id: 'shellEarR',
+      node: 'head',
+      shape: 'box',
+      size: [0.16, 0.3, 0.16],
+      position: [0.26, 0.42, 0],
+      rotation: [0, 0, -0.35],
+      color: 'accent2',
+    },
+  ],
+
+  /** Antigravity: a doorway arch wrapping the head, the crown in the second brand colour. */
+  arch: [
+    {
+      id: 'shellArchTop',
+      node: 'head',
+      shape: 'box',
+      size: [0.96, 0.13, 0.62],
+      position: [0, 0.35, 0],
+      color: 'accent2',
+    },
+    {
+      id: 'shellArchPostL',
+      node: 'head',
+      shape: 'box',
+      size: [0.12, 0.44, 0.6],
+      position: [-0.46, 0.09, 0],
+      color: 'body',
+    },
+    {
+      id: 'shellArchPostR',
+      node: 'head',
+      shape: 'box',
+      size: [0.12, 0.44, 0.6],
+      position: [0.46, 0.09, 0],
+      color: 'body',
+    },
+  ],
+
+  /**
+   * Codex and OpenAI: a hexagon. Four 45-degree chamfers carry the outline out
+   * past the cranium, bridged by a bar above and below.
+   */
+  hex: [
+    {
+      id: 'shellHexTop',
+      node: 'head',
+      shape: 'box',
+      size: [0.56, 0.09, 0.56],
+      position: [0, 0.34, 0],
+      color: 'body',
+    },
+    {
+      id: 'shellHexBottom',
+      node: 'head',
+      shape: 'box',
+      size: [0.56, 0.09, 0.56],
+      position: [0, -0.34, 0],
+      color: 'body',
+    },
+    {
+      id: 'shellHexChamferTR',
+      node: 'head',
+      shape: 'box',
+      size: [0.2, 0.09, 0.56],
+      position: [0.37, 0.3, 0],
+      rotation: [0, 0, -Math.PI / 4],
+      color: 'body',
+    },
+    {
+      id: 'shellHexChamferTL',
+      node: 'head',
+      shape: 'box',
+      size: [0.2, 0.09, 0.56],
+      position: [-0.37, 0.3, 0],
+      rotation: [0, 0, Math.PI / 4],
+      color: 'body',
+    },
+    {
+      id: 'shellHexChamferBR',
+      node: 'head',
+      shape: 'box',
+      size: [0.2, 0.09, 0.56],
+      position: [0.37, -0.3, 0],
+      rotation: [0, 0, Math.PI / 4],
+      color: 'body',
+    },
+    {
+      id: 'shellHexChamferBL',
+      node: 'head',
+      shape: 'box',
+      size: [0.2, 0.09, 0.56],
+      position: [-0.37, -0.3, 0],
+      rotation: [0, 0, -Math.PI / 4],
+      color: 'body',
+    },
+  ],
+
+  /** Kilo Code: a pixel crown — four stepped blocks, deliberately uneven. */
+  pixel: [
+    {
+      id: 'shellPixel1',
+      node: 'head',
+      shape: 'box',
+      size: [0.18, 0.16, 0.52],
+      position: [-0.3, 0.36, 0],
+      color: 'body',
+    },
+    {
+      id: 'shellPixel2',
+      node: 'head',
+      shape: 'box',
+      size: [0.18, 0.26, 0.52],
+      position: [-0.1, 0.41, 0],
+      color: 'accent2',
+    },
+    {
+      id: 'shellPixel3',
+      node: 'head',
+      shape: 'box',
+      size: [0.18, 0.2, 0.52],
+      position: [0.1, 0.38, 0],
+      color: 'body',
+    },
+    {
+      id: 'shellPixel4',
+      node: 'head',
+      shape: 'box',
+      size: [0.18, 0.12, 0.52],
+      position: [0.3, 0.34, 0],
+      color: 'body',
+    },
+  ],
+
+  /**
+   * OpenCode: a rounded crown — two crossed tubes lying over the top of the
+   * cranium. The tube's axis is its Y, so the long side is written into `size[1]`
+   * and rotated into place; that keeps the bounds maths (which rotates the
+   * size box) and the rendered cylinder in agreement.
+   */
+  round: [
+    {
+      id: 'shellRoundCapX',
+      node: 'head',
+      shape: 'cylinder',
+      size: [0.36, 0.86, 0.36],
+      position: [0, 0.36, 0],
+      rotation: [0, 0, Math.PI / 2],
+      radiusTop: 0.18,
+      radiusBottom: 0.18,
+      segments: 16,
+      color: 'body',
+    },
+    {
+      id: 'shellRoundCapZ',
+      node: 'head',
+      shape: 'cylinder',
+      size: [0.36, 0.6, 0.36],
+      position: [0, 0.36, 0],
+      rotation: [Math.PI / 2, 0, 0],
+      radiusTop: 0.18,
+      radiusBottom: 0.18,
+      segments: 16,
+      color: 'body',
+    },
+  ],
+
+  /** Nous: manga hair — a mass on top plus a fringe of uneven strands over the brow. */
+  manga: [
+    {
+      id: 'shellHairCap',
+      node: 'head',
+      shape: 'box',
+      size: [0.82, 0.14, 0.6],
+      position: [0, 0.31, 0],
+      color: 'accent2',
+    },
+    {
+      id: 'shellHairL',
+      node: 'head',
+      shape: 'box',
+      size: [0.1, 0.2, 0.06],
+      position: [-0.24, 0.25, 0.27],
+      color: 'accent2',
+    },
+    {
+      id: 'shellHairMidL',
+      node: 'head',
+      shape: 'box',
+      size: [0.1, 0.16, 0.06],
+      position: [-0.12, 0.23, 0.27],
+      color: 'accent2',
+    },
+    {
+      id: 'shellHairMid',
+      node: 'head',
+      shape: 'box',
+      size: [0.1, 0.22, 0.06],
+      position: [0, 0.26, 0.27],
+      color: 'accent2',
+    },
+    {
+      id: 'shellHairMidR',
+      node: 'head',
+      shape: 'box',
+      size: [0.1, 0.16, 0.06],
+      position: [0.12, 0.23, 0.27],
+      color: 'accent2',
+    },
+    {
+      id: 'shellHairR',
+      node: 'head',
+      shape: 'box',
+      size: [0.1, 0.2, 0.06],
+      position: [0.24, 0.25, 0.27],
+      color: 'accent2',
+    },
+  ],
+};
+
+/**
+ * Antenna toppers, relative to the `antenna` node.
+ *
+ * A topper *replaces* the yellow ball rather than joining it, so `ball` has no
+ * parts: the rig draws that sphere itself because it pulses through a ref.
+ * Everything here must fit `TOPPER_ENVELOPE`.
+ */
+export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
+  ball: [],
+
+  /** CodeBuddy: a tiny cat face on the aerial. */
+  catface: [
+    {
+      id: 'topCatEarL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.09, 0.05],
+      position: [-0.055, 0.44, 0],
+      rotation: [0, 0, 0.4],
+      color: 'accent2',
+    },
+    {
+      id: 'topCatEarR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.09, 0.05],
+      position: [0.055, 0.44, 0],
+      rotation: [0, 0, -0.4],
+      color: 'accent2',
+    },
+    {
+      id: 'topCatFace',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.14, 0.12, 0.05],
+      position: [0, 0.34, 0.02],
+      color: 'body',
+    },
+  ],
+
+  /** Antigravity: an inverted U, the same doorway motif as the shell. */
+  arch: [
+    {
+      id: 'topArchTop',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.06],
+      position: [0, 0.47, 0],
+      color: 'accent2',
+    },
+    {
+      id: 'topArchLegL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.2, 0.06],
+      position: [-0.075, 0.37, 0],
+      color: 'body',
+    },
+    {
+      id: 'topArchLegR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.2, 0.06],
+      position: [0.075, 0.37, 0],
+      color: 'body',
+    },
+  ],
+
+  /** Codex: three crossed bars — a knot, not a ring. */
+  knot: [
+    {
+      id: 'topKnotA',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, 0.9],
+      color: 'body',
+    },
+    {
+      id: 'topKnotB',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, -0.9],
+      color: 'body',
+    },
+    {
+      id: 'topKnotC',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.05],
+      position: [0, 0.38, 0],
+      color: 'body',
+    },
+  ],
+
+  /** Gemini: an eight-point sparkle — two diagonals plus two short crosses. */
+  sparkle: [
+    {
+      id: 'topSparkleD1',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.22, 0.06, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, Math.PI / 4],
+      color: 'body',
+    },
+    {
+      id: 'topSparkleD2',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.22, 0.06, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, -Math.PI / 4],
+      color: 'body',
+    },
+    {
+      id: 'topSparkleH',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.16, 0.05, 0.05],
+      position: [0, 0.38, 0],
+      color: 'body',
+    },
+    {
+      id: 'topSparkleV',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.16, 0.05],
+      position: [0, 0.38, 0],
+      color: 'body',
+    },
+  ],
+
+  /** Kilo Code: a K built from five blocks, keeping the pixel language. */
+  pixelK: [
+    {
+      id: 'topKiloStem',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.22, 0.05],
+      position: [-0.05, 0.38, 0],
+      color: 'body',
+    },
+    {
+      id: 'topKiloArm1',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.06, 0.05],
+      position: [0, 0.44, 0],
+      color: 'body',
+    },
+    {
+      id: 'topKiloArm2',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.06, 0.05],
+      position: [0.055, 0.47, 0],
+      color: 'body',
+    },
+    {
+      id: 'topKiloLeg1',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.06, 0.05],
+      position: [0, 0.32, 0],
+      color: 'body',
+    },
+    {
+      id: 'topKiloLeg2',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.06, 0.06, 0.05],
+      position: [0.055, 0.29, 0],
+      color: 'body',
+    },
+  ],
+
+  /** NVIDIA: the eye — two lids and a pupil. */
+  eye: [
+    {
+      id: 'topEyeLidUp',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.05],
+      position: [0, 0.42, 0],
+      rotation: [0, 0, 0.35],
+      color: 'body',
+    },
+    {
+      id: 'topEyeLidDown',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.05, 0.05],
+      position: [0, 0.34, 0],
+      rotation: [0, 0, -0.35],
+      color: 'body',
+    },
+    {
+      id: 'topEyePupil',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.07, 0.07, 0.06],
+      position: [0, 0.38, 0.01],
+      color: 'accent2',
+    },
+  ],
+
+  /** Nous: three hanging strands and a bar, the aerial's version of the fringe. */
+  nfringe: [
+    {
+      id: 'topFringeCap',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.06, 0.05],
+      position: [0, 0.47, 0],
+      color: 'accent2',
+    },
+    {
+      id: 'topFringeL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.16, 0.05],
+      position: [-0.06, 0.36, 0.02],
+      color: 'accent2',
+    },
+    {
+      id: 'topFringeM',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.2, 0.05],
+      position: [0, 0.38, 0.02],
+      color: 'accent2',
+    },
+    {
+      id: 'topFringeR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.16, 0.05],
+      position: [0.06, 0.36, 0.02],
+      color: 'accent2',
+    },
+  ],
+
+  /** OpenCode: a prompt — top bar, chevron, underscore. */
+  terminal: [
+    {
+      id: 'topTermBar',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.18, 0.05, 0.05],
+      position: [0, 0.46, 0],
+      color: 'body',
+    },
+    {
+      id: 'topTermChevUp',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.05, 0.05],
+      position: [-0.04, 0.4, 0],
+      rotation: [0, 0, -0.7],
+      color: 'body',
+    },
+    {
+      id: 'topTermChevDown',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.05, 0.05],
+      position: [-0.04, 0.3, 0],
+      rotation: [0, 0, 0.7],
+      color: 'body',
+    },
+    {
+      id: 'topTermUnderscore',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.05, 0.05],
+      position: [0.05, 0.28, 0],
+      color: 'body',
+    },
+  ],
+
+  /** OpenRouter: three arrows pointing opposite ways, as in its mark. */
+  router: [
+    {
+      id: 'topRouterShaft1',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.16, 0.04, 0.05],
+      position: [-0.01, 0.46, 0],
+      color: 'body',
+    },
+    {
+      id: 'topRouterHead1',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.1, 0.05],
+      position: [0.08, 0.46, 0],
+      color: 'body',
+    },
+    {
+      id: 'topRouterShaft2',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.16, 0.04, 0.05],
+      position: [0.01, 0.38, 0],
+      color: 'body',
+    },
+    {
+      id: 'topRouterHead2',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.1, 0.05],
+      position: [-0.08, 0.38, 0],
+      color: 'body',
+    },
+    {
+      id: 'topRouterShaft3',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.16, 0.04, 0.05],
+      position: [-0.01, 0.3, 0],
+      color: 'body',
+    },
+    {
+      id: 'topRouterHead3',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.05, 0.1, 0.05],
+      position: [0.08, 0.3, 0],
+      color: 'body',
+    },
+  ],
+
+  /** Anthropic: three radial strokes — the asterisk, not a letter. */
+  burst: [
+    {
+      id: 'topBurstA',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.045, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, 0.55],
+      color: 'body',
+    },
+    {
+      id: 'topBurstB',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.045, 0.05],
+      position: [0, 0.38, 0],
+      rotation: [0, 0, -0.55],
+      color: 'body',
+    },
+    {
+      id: 'topBurstC',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.2, 0.045, 0.05],
+      position: [0, 0.38, 0],
+      color: 'body',
+    },
+  ],
+
+  /** OpenAI: a hexagonal rosette — six bars, visibly different from Codex's knot. */
+  openai: [
+    {
+      id: 'topOpenaiTop',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [0, 0.47, 0],
+      color: 'body',
+    },
+    {
+      id: 'topOpenaiBottom',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [0, 0.29, 0],
+      color: 'body',
+    },
+    {
+      id: 'topOpenaiUR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [0.045, 0.42, 0],
+      rotation: [0, 0, Math.PI / 3],
+      color: 'body',
+    },
+    {
+      id: 'topOpenaiUL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [-0.045, 0.42, 0],
+      rotation: [0, 0, -Math.PI / 3],
+      color: 'body',
+    },
+    {
+      id: 'topOpenaiLR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [0.045, 0.34, 0],
+      rotation: [0, 0, -Math.PI / 3],
+      color: 'body',
+    },
+    {
+      id: 'topOpenaiLL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.04, 0.05],
+      position: [-0.045, 0.34, 0],
+      rotation: [0, 0, Math.PI / 3],
+      color: 'body',
+    },
+  ],
+
+  /** Ollama: a llama head with two ears and a muzzle. */
+  llama: [
+    {
+      id: 'topLlamaHead',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.1, 0.12, 0.06],
+      position: [0, 0.35, 0.01],
+      color: 'body',
+    },
+    {
+      id: 'topLlamaEarL',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.04, 0.1, 0.05],
+      position: [-0.035, 0.46, 0],
+      color: 'body',
+    },
+    {
+      id: 'topLlamaEarR',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.04, 0.1, 0.05],
+      position: [0.035, 0.46, 0],
+      color: 'body',
+    },
+    {
+      id: 'topLlamaMuzzle',
+      node: 'antenna',
+      shape: 'box',
+      size: [0.07, 0.05, 0.06],
+      position: [0, 0.285, 0.02],
+      color: 'accent2',
+    },
+  ],
+};
+
+/**
+ * Chest emblems, relative to the `torso` node.
+ *
+ * They sit on the existing cream `belly` panel — no new plate — so they never
+ * collide with the bow tie above or the name badge beside it. `unlit` keeps the
+ * brand colour from going muddy under the key light, the way `nameBadgeStripe`
+ * already does.
+ */
+export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
+  none: [],
+
+  catface: [
+    {
+      id: 'emCatEarL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.07, 0.07, 0.012],
+      position: [-0.06, 0.49, 0.267],
+      rotation: [0, 0, 0.5],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emCatEarR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.07, 0.07, 0.012],
+      position: [0.06, 0.49, 0.267],
+      rotation: [0, 0, -0.5],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emCatFace',
+      node: 'torso',
+      shape: 'box',
+      size: [0.16, 0.13, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+  ],
+
+  arch: [
+    {
+      id: 'emArchTop',
+      node: 'torso',
+      shape: 'box',
+      size: [0.24, 0.05, 0.012],
+      position: [0, 0.47, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emArchLegL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.18, 0.012],
+      position: [-0.095, 0.38, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emArchLegR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.18, 0.012],
+      position: [0.095, 0.38, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+  ],
+
+  knot: [
+    {
+      id: 'emKnotA',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, 0.9],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKnotB',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, -0.9],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKnotC',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  sparkle: [
+    {
+      id: 'emSparkleD1',
+      node: 'torso',
+      shape: 'box',
+      size: [0.24, 0.05, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, Math.PI / 4],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emSparkleD2',
+      node: 'torso',
+      shape: 'box',
+      size: [0.24, 0.05, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, -Math.PI / 4],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emSparkleH',
+      node: 'torso',
+      shape: 'box',
+      size: [0.14, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emSparkleV',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.14, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  pixelK: [
+    {
+      id: 'emKiloStem',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.2, 0.012],
+      position: [-0.045, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKiloArm1',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.05, 0.012],
+      position: [0, 0.46, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKiloArm2',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.05, 0.012],
+      position: [0.045, 0.49, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKiloLeg1',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.05, 0.012],
+      position: [0, 0.34, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emKiloLeg2',
+      node: 'torso',
+      shape: 'box',
+      size: [0.05, 0.05, 0.012],
+      position: [0.045, 0.31, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  eye: [
+    {
+      id: 'emEyeLidUp',
+      node: 'torso',
+      shape: 'box',
+      size: [0.24, 0.045, 0.012],
+      position: [0, 0.44, 0.267],
+      rotation: [0, 0, 0.35],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emEyeLidDown',
+      node: 'torso',
+      shape: 'box',
+      size: [0.24, 0.045, 0.012],
+      position: [0, 0.36, 0.267],
+      rotation: [0, 0, -0.35],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emEyePupil',
+      node: 'torso',
+      shape: 'box',
+      size: [0.07, 0.07, 0.012],
+      position: [0, 0.4, 0.268],
+      color: 'accent2',
+      unlit: true,
+    },
+  ],
+
+  nfringe: [
+    {
+      id: 'emFringeCap',
+      node: 'torso',
+      shape: 'box',
+      size: [0.18, 0.05, 0.012],
+      position: [0, 0.48, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emFringeL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.14, 0.012],
+      position: [-0.055, 0.38, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emFringeM',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.18, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+    {
+      id: 'emFringeR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.14, 0.012],
+      position: [0.055, 0.38, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+  ],
+
+  terminal: [
+    {
+      id: 'emTermBar',
+      node: 'torso',
+      shape: 'box',
+      size: [0.18, 0.045, 0.012],
+      position: [0, 0.47, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emTermChevUp',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.045, 0.012],
+      position: [-0.035, 0.42, 0.267],
+      rotation: [0, 0, -0.7],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emTermChevDown',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.045, 0.012],
+      position: [-0.035, 0.34, 0.267],
+      rotation: [0, 0, 0.7],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emTermUnderscore',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.045, 0.012],
+      position: [0.045, 0.32, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  router: [
+    {
+      id: 'emRouterShaft1',
+      node: 'torso',
+      shape: 'box',
+      size: [0.14, 0.035, 0.012],
+      position: [-0.01, 0.47, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emRouterHead1',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.09, 0.012],
+      position: [0.0725, 0.47, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emRouterShaft2',
+      node: 'torso',
+      shape: 'box',
+      size: [0.14, 0.035, 0.012],
+      position: [0.01, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emRouterHead2',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.09, 0.012],
+      position: [-0.0725, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emRouterShaft3',
+      node: 'torso',
+      shape: 'box',
+      size: [0.14, 0.035, 0.012],
+      position: [-0.01, 0.33, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emRouterHead3',
+      node: 'torso',
+      shape: 'box',
+      size: [0.045, 0.09, 0.012],
+      position: [0.0725, 0.33, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  burst: [
+    {
+      id: 'emBurstA',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, 0.55],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emBurstB',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      rotation: [0, 0, -0.55],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emBurstC',
+      node: 'torso',
+      shape: 'box',
+      size: [0.2, 0.045, 0.012],
+      position: [0, 0.4, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  openai: [
+    {
+      id: 'emOpenaiTop',
+      node: 'torso',
+      shape: 'box',
+      size: [0.1, 0.035, 0.012],
+      position: [0, 0.47, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emOpenaiBottom',
+      node: 'torso',
+      shape: 'box',
+      size: [0.1, 0.035, 0.012],
+      position: [0, 0.33, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emOpenaiUR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.035, 0.012],
+      position: [0.0425, 0.44, 0.267],
+      rotation: [0, 0, Math.PI / 3],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emOpenaiUL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.035, 0.012],
+      position: [-0.0425, 0.44, 0.267],
+      rotation: [0, 0, -Math.PI / 3],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emOpenaiLR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.035, 0.012],
+      position: [0.0425, 0.36, 0.267],
+      rotation: [0, 0, -Math.PI / 3],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emOpenaiLL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.09, 0.035, 0.012],
+      position: [-0.0425, 0.36, 0.267],
+      rotation: [0, 0, Math.PI / 3],
+      color: 'body',
+      unlit: true,
+    },
+  ],
+
+  llama: [
+    {
+      id: 'emLlamaHead',
+      node: 'torso',
+      shape: 'box',
+      size: [0.1, 0.12, 0.012],
+      position: [0, 0.37, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emLlamaEarL',
+      node: 'torso',
+      shape: 'box',
+      size: [0.035, 0.08, 0.012],
+      position: [-0.035, 0.46, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emLlamaEarR',
+      node: 'torso',
+      shape: 'box',
+      size: [0.035, 0.08, 0.012],
+      position: [0.035, 0.46, 0.267],
+      color: 'body',
+      unlit: true,
+    },
+    {
+      id: 'emLlamaMuzzle',
+      node: 'torso',
+      shape: 'box',
+      size: [0.07, 0.05, 0.012],
+      position: [0, 0.305, 0.267],
+      color: 'accent2',
+      unlit: true,
+    },
+  ],
+};
+
+/** The shape half of an identity: everything the part tables need. */
+export interface IdentityShape {
+  shell: ShellId;
+  topper: TopperId;
+  emblem: EmblemId;
+}
+
+/**
+ * The blocks an identity adds — shells, topper and emblem, never the base body.
+ *
+ * This is the only function the mounted `.glb` may use: its joints already carry
+ * the baked `ROBOT_PARTS`, so adding them again would double every block.
+ */
+export function identityPartsFor(identity: IdentityShape): readonly RobotPart[] {
+  return [
+    ...SHELLS[identity.shell],
+    ...TOPPERS[identity.topper],
+    ...EMBLEMS[identity.emblem],
+  ];
+}
+
+/** The whole robot for one identity: the shared body plus what makes it *that* bot. */
+export function robotPartsFor(identity: IdentityShape): readonly RobotPart[] {
+  return [...ROBOT_PARTS, ...identityPartsFor(identity)];
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Bounds                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -449,13 +1764,18 @@ export function robotNodePosition(id: RobotNodeId): [number, number, number] {
 }
 
 /**
- * Axis-aligned bounds of the whole robot in root space.
+ * Axis-aligned bounds of the robot in root space.
  *
  * Used to normalise a hand-made `.glb` to the procedural robot's height, and
  * cross-checked against three's own `Box3` by the generator — if the two ever
  * disagree the build fails.
+ *
+ * `extraParts` folds in blocks that are not part of the neutral body. Identity
+ * parts must NOT be passed here by anything that feeds `ROBOT_HEIGHT`: that
+ * number is the *body* height, and scaling the neutral `.glb` by an envelope
+ * height would lift its hips off the chair.
  */
-export function robotBounds(): RobotBounds {
+export function robotBounds(extraParts: readonly RobotPart[] = []): RobotBounds {
   const nodePosition = robotNodePosition;
 
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
@@ -480,7 +1800,7 @@ export function robotBounds(): RobotBounds {
     }
   };
 
-  for (const part of ROBOT_PARTS) {
+  for (const part of [...ROBOT_PARTS, ...extraParts]) {
     include(
       part.node,
       part.position,
@@ -527,3 +1847,48 @@ export function robotBounds(): RobotBounds {
 
 /** Rest-pose height of the procedural robot, in metres. */
 export const ROBOT_HEIGHT = robotBounds().height;
+
+/**
+ * Union of two bounds. Local to the module because `robotModel.ts` must stay
+ * import-free (Node loads it directly with type-stripping).
+ */
+function unionBounds(a: RobotBounds, b: RobotBounds): RobotBounds {
+  const min: [number, number, number] = [
+    Math.min(a.min[0], b.min[0]),
+    Math.min(a.min[1], b.min[1]),
+    Math.min(a.min[2], b.min[2]),
+  ];
+  const max: [number, number, number] = [
+    Math.max(a.max[0], b.max[0]),
+    Math.max(a.max[1], b.max[1]),
+    Math.max(a.max[2], b.max[2]),
+  ];
+  return { min, max, height: max[1] - min[1] };
+}
+
+/**
+ * The tallest a bot can ever be: the neutral body unioned with every shell,
+ * topper and emblem in the three tables.
+ *
+ * Deliberately computed from the *shape tables*, not from `IDENTITIES`: this
+ * module cannot import `providerIdentity.ts` (it has no runtime imports at all,
+ * see the header), and deriving it from shapes is the more correct definition —
+ * a provider added later inherits the envelope automatically.
+ *
+ * Used only to place UI above the robot (the name pill). It must never feed
+ * `ROBOT_HEIGHT`, which sizes the neutral `.glb`.
+ */
+export function identityBounds(): RobotBounds {
+  const identityParts = [
+    ...Object.values(SHELLS),
+    ...Object.values(TOPPERS),
+    ...Object.values(EMBLEMS),
+  ].flat();
+  return unionBounds(robotBounds(), robotBounds(identityParts));
+}
+
+/** Highest point any identity reaches, in root space (metres). */
+export const ROBOT_ENVELOPE_TOP = identityBounds().max[1];
+
+/** Full height of that envelope, in metres. */
+export const ROBOT_ENVELOPE_HEIGHT = identityBounds().height;

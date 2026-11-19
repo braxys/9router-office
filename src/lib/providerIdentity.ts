@@ -11,8 +11,10 @@
  *
  * Deliberately dependency-free (no React, no three, and `import type` only) so
  * Node can import it directly with type-stripping, the same way it imports
- * `robotModel.ts`.
+ * `robotModel.ts`. The shape unions live in `robotModel.ts` because that module
+ * owns the part tables; they arrive here as types and are erased at runtime.
  */
+import type { EmblemId, ShellId, TopperId } from './robotModel';
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -39,34 +41,6 @@ export type IdentityId =
   | 'anthropic'
   | 'openai'
   | 'ollama';
-
-/**
- * The head silhouette. `box` is the plain cranium every bot has; the others add
- * blocks around it, so one neutral `.glb` stays valid for all of them.
- */
-export type ShellId = 'box' | 'cat' | 'arch' | 'hex' | 'pixel' | 'round' | 'manga';
-
-/**
- * What sits on the antenna. `ball` is the original yellow sphere and is drawn
- * by the rig itself (it pulses), not from a part table.
- */
-export type TopperId =
-  | 'ball'
-  | 'catface'
-  | 'arch'
-  | 'knot'
-  | 'sparkle'
-  | 'pixelK'
-  | 'eye'
-  | 'nfringe'
-  | 'terminal'
-  | 'router'
-  | 'burst'
-  | 'openai'
-  | 'llama';
-
-/** The chest badge. Every topper doubles as one, except the ball. */
-export type EmblemId = Exclude<TopperId, 'ball'> | 'none';
 
 export interface ProviderIdentity {
   id: IdentityId;
