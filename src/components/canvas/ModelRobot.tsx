@@ -201,15 +201,17 @@ function LoadedModelRobot({
       else apply(mesh.material as THREE.Material);
     });
 
-    // The neutral `.glb` bakes the yellow antenna ball. Any provider topper
-    // replaces it, so hide the baked one rather than stacking a shell on a ball.
-    if (identity.topper !== 'ball') {
-      const ball = copy.getObjectByName('antennaBall');
-      if (ball) ball.visible = false;
-    }
+    // The neutral `.glb` bakes the yellow antenna ball, but `<AntennaTopper>` is
+    // the single owner of whatever sits on the antenna — it renders that same
+    // ball for a `ball` identity and the provider's topper otherwise. So the
+    // baked one is always hidden: leaving it visible would stack a second,
+    // identical yellow sphere at the same position for `default`/unknown
+    // providers, which z-fights rather than reading as one ball.
+    const bakedBall = copy.getObjectByName('antennaBall');
+    if (bakedBall) bakedBall.visible = false;
 
     return copy;
-  }, [scene, accentColor, identity]);
+  }, [scene, accentColor]);
 
   // The joints are looked up once per clone. The `.glb` stores them under the
   // same names the spec uses (`ROBOT_NODES`), which is what lets the animation

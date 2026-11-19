@@ -31,6 +31,7 @@ import {
   robotNodePosition,
 } from '../src/lib/robotModel.ts';
 import { IDENTITIES, resolveIdentity } from '../src/lib/providerIdentity.ts';
+import { readFileSync } from 'node:fs';
 
 let failures = 0;
 let total = 0;
@@ -468,6 +469,39 @@ for (const [id, identity] of Object.entries(IDENTITIES)) {
   }
 }
 check('no alias is claimed twice', seen.size, [...seen.keys()].length);
+
+/* -------------------------------------------------------------------------- */
+console.log('\n--- one owner for whatever sits on the antenna ---\n');
+
+// The `.glb` bakes a yellow antenna ball; `<AntennaTopper>` also renders one for
+// a `ball` identity. Two owners means two identical spheres at the same
+// position for `default`/unknown providers, which z-fights instead of reading as
+// one ball. This is an integration contract between two files, so it cannot be
+// expressed by importing the tables — the sources are asserted directly.
+const modelSource = readFileSync(new URL('../src/components/canvas/ModelRobot.tsx', import.meta.url), 'utf8');
+const topperSource = readFileSync(new URL('../src/components/canvas/RobotParts.tsx', import.meta.url), 'utf8');
+
+// `AntennaTopper` must own the ball case itself, so the baked mesh is redundant
+// for every identity and can always be hidden.
+check(
+  'AntennaTopper renders the default ball',
+  /identity\.topper === 'ball'/.test(topperSource),
+  true,
+);
+check(
+  'ModelRobot hides the baked antennaBall unconditionally',
+  /const bakedBall = copy\.getObjectByName\('antennaBall'\);\s*\n\s*if \(bakedBall\) bakedBall\.visible = false;/.test(
+    modelSource,
+  ),
+  true,
+);
+// A conditional hide is the exact regression: it re-exposes the duplicate ball
+// for the one identity that still asks for a ball.
+check(
+  'ModelRobot does not gate the hide on the topper kind',
+  /identity\.topper !== 'ball'/.test(modelSource),
+  false,
+);
 
 /* -------------------------------------------------------------------------- */
 console.log(`\n${total - failures}/${total} passed`);
