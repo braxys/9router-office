@@ -477,6 +477,30 @@ for (const id of Object.keys(IDENTITIES)) {
   check(`${id}: color === palette.body`, resolveIdentity(id).color, IDENTITIES[id].palette?.body);
 }
 
+// The brand table itself, written out. `color === palette.body` above reads both
+// sides from the same field, so it proves the wiring and pins no hex; a typo in a
+// brand colour would otherwise pass every gate. This is the only place the exact
+// values live outside the module, and it is deliberately a copy: a spec edit must
+// be made twice, on purpose.
+const PALETTE_GRID = {
+  codebuddy: { body: '#6C4DFF', limb: '#2EA99D', accent: '#2EA99D', extra: '#2EA99D' },
+  antigravity: { body: '#3186FF', limb: '#FC413D', accent: '#FFE432', extra: '#00B95C' },
+  codex: { body: '#F2F2F2', limb: '#1A1A1A', accent: '#10A37F', extra: '#1A1A1A' },
+  gemini: { body: '#4285F4', limb: '#9B72CB', accent: '#D96570', extra: '#F9AB00' },
+  kilocode: { body: '#F4ED14', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  nvidia: { body: '#76B900', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  nous: { body: '#111111', limb: '#F2F2F2', accent: '#0000F2', extra: '#F2F2F2' },
+  opencode: { body: '#D2D2D2', limb: '#1F1F1F', accent: '#3B5CF6', extra: '#1F1F1F' },
+  openrouter: { body: '#7624F4', limb: '#03080A', accent: '#C8FF00', extra: '#03080A' },
+  anthropic: { body: '#D97757', limb: '#191919', accent: '#191919', extra: '#191919' },
+  openai: { body: '#10A37F', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  ollama: { body: '#9AA7B4', limb: '#111111', accent: '#111111', extra: '#111111' },
+};
+
+for (const [id, expected] of Object.entries(PALETTE_GRID)) {
+  check(`${id} palette is the brand grid`, IDENTITIES[id].palette, expected);
+}
+
 /* -------------------------------------------------------------------------- */
 console.log('\n--- palettes are unique, and shins wear the fourth colour ---\n');
 
@@ -580,6 +604,11 @@ check('body-only palette derives extra from the same darkened body',
   resolveRobotColor('extra', ACCENT, BODY_ONLY), '#d10000');
 check('body-only palette keeps accent on the body',
   resolveRobotColor('accent', ACCENT, BODY_ONLY), '#FF0000');
+
+// `extra` must inherit a *declared* limb, not re-derive one. A palette with only
+// `limb` is the sole input that can observe the hop: without it, `extra` and `limb`
+// both bottom out in `darkenHex(body)`, and dropping the hop is invisible.
+check('extra inherits a declared limb', resolveRobotColor('extra', ACCENT, { limb: '#2EA99D' }), '#2EA99D');
 
 /* -------------------------------------------------------------------------- */
 console.log('\n--- telemetry: the simulation roster carries real identities ---\n');
