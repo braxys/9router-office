@@ -397,7 +397,8 @@ check('FACE.errorBar keeps its pink', FACE.errorBar.color, 'pink');
 // other check on a `ROBOT_COLORS` entry compares a role key, and the render gate
 // resolves through the same table, so a typo in a hex would pass every gate.
 // `FACE.errorBar` in particular is a single part whose colour is otherwise only
-// ever asserted by name.
+// ever asserted by name. A deliberate copy: a spec edit must be made twice, on
+// purpose.
 const ROBOT_COLORS_GRID = {
   cream: '#fdfbf6',
   ink: '#3a4a58',
@@ -409,8 +410,12 @@ const ROBOT_COLORS_GRID = {
   yellow: '#ffc94d',
 };
 
-for (const [key, expected] of Object.entries(ROBOT_COLORS_GRID)) {
-  check(`ROBOT_COLORS.${key} is the office hex`, ROBOT_COLORS[key], expected);
+// Iterate `ROBOT_COLORS`, not the grid: the grid is a literal copy that a future
+// colour key will not automatically extend, and looping over it would silently
+// stop covering every key added after today. A missing row must surface as a
+// FAIL (`expected: undefined`), not a TypeError.
+for (const key of Object.keys(ROBOT_COLORS)) {
+  check(`ROBOT_COLORS.${key} is the office hex`, ROBOT_COLORS[key], ROBOT_COLORS_GRID[key]);
 }
 
 // The generator bakes `userData.recolor` from this list and `ModelRobot` tints
