@@ -60,6 +60,9 @@ seluruh nilai "office"-nya hilang dan yang tersisa cuma grafik batang berwarna.
 - `scripts/layout-check.mjs` mengimpor `src/lib/agents.ts` langsung lewat type
   stripping Node. Modul itu **tidak boleh** mendapat import runtime baru (lihat
   *Keputusan 6*).
+- `src/lib/robotModel.ts` **tidak boleh** mendapat import runtime sama sekali;
+  ia diimpor langsung Node dari `build-robot-model.mjs` dan `status-rules.mjs`
+  (lihat *Keputusan 8*).
 - `npm run typecheck`, `npm run lint`, `npm run smoke`, `npm run layout:test`,
   `npm run build:model`, dan `npm run build` harus tetap hijau.
 
@@ -123,7 +126,8 @@ export const ROBOT_ENVELOPE_HEIGHT = ROBOT_ENVELOPE.height; // ~2.46 m
   (termasuk `ANTENNA_BALL`), jadi `build:model` dan `ModelRobot` tetap 1:1.
 - `identityBounds()` baru: union `robotBounds()` dengan seluruh part
   `SHELLS`/`TOPPERS`/`EMBLEMS`. Ia hanya dipakai `Scene` untuk anchor pill dan
-  `identity:test` untuk gate amplop.
+  `identity:test` untuk gate amplop. **Ia tidak membaca `IDENTITIES`** — lihat
+  *Keputusan 8*.
 - **`build-robot-model.mjs` benar-benar tidak berubah** dan `npm run build:model`
   harus menghasilkan file yang identik. Itu masuk daftar verifikasi.
 
@@ -227,6 +231,37 @@ tak menguji apa pun. Itu percobaan mengubah penilaian visual menjadi test.
 dua identitas dengan triple `(shell, topper, color)` yang identik.** Aturan
 "fitur siluet berani hanya untuk logo yang punya bentuk khas" tetap ada sebagai
 panduan authoring di dokumen ini, bukan sebagai test.
+
+### Keputusan 8 — `robotModel.ts` wajib bebas import runtime
+
+Ditemukan saat menulis rencana, lalu dibuktikan dengan Node dan `tsc` sungguhan.
+
+`robotModel.ts` diimpor **langsung oleh Node** (type stripping) dari
+`build-robot-model.mjs` dan `status-rules.mjs`. Hari ini ia nol import. Begitu ia
+butuh nilai dari modul lain:
+
+- `import { X } from './providerIdentity'` → Node: `ERR_MODULE_NOT_FOUND`
+- `import { X } from './providerIdentity.ts'` → `tsc`: `TS5097` (butuh
+  `allowImportingTsExtensions`, artinya mengubah `tsconfig.json`)
+- `import type { X } from './does-not-exist'` → Node **jalan** (import type
+  dihapus total), `tsc` yang menangkap. Jadi hanya `import type` yang aman — dan
+  itu tidak bisa dipakai untuk membaca nilai seperti `IDENTITIES`.
+
+**Keputusan:** `identityBounds()` menghitung union dari **ketiga tabel bentuk**,
+bukan dari daftar identitas:
+
+```ts
+const all = [...Object.values(SHELLS), ...Object.values(TOPPERS), ...Object.values(EMBLEMS)].flat();
+```
+
+Ini bukan kompromi — hasilnya lebih benar: provider baru yang menambah cangkang
+otomatis masuk amplop tanpa menyentuh dua file. Arah dependensi yang sah:
+`providerIdentity → robotModel` (runtime, dari modul yang di-bundle Next) dan
+`providerIdentity → robotModel` (type-only, untuk `ShellId` dkk).
+`robotModel → providerIdentity` **tidak pernah**.
+
+Gate: `npm run status:test` dan `npm run build:model` sama-sama mengimpor
+`robotModel.ts`; keduanya merah kalau aturan ini dilanggar.
 
 ### Sumber identitas — `src/lib/providerIdentity.ts` (baru)
 
@@ -354,7 +389,8 @@ Assertion yang dijalankan terhadap kode shipping, bukan salinan:
 3. Alias simulasi (`gemini-2.5-pro`, `claude-sonnet-4-5`, `gpt-5-1`,
    `llama-3-3-70b`) memetakan ke `gemini`, `anthropic`, `openai`, `ollama`.
 4. **Wajah utuh:** tidak ada part shell/topper/emblem yang menembus kotak `FACE`.
-5. **Amplop:** `identityBounds()` untuk setiap identitas ≤ `IDENTITY_ENVELOPE`.
+5. **Amplop:** setiap identitas ≤ `IDENTITY_ENVELOPE`, dan `identityBounds()`
+   dihitung dari tabel bentuk (bukan dari daftar identitas).
 6. **Tidak ada kembar:** tidak ada dua identitas dengan triple
    `(shell, topper, color)` identik.
 7. **Satu sumber warna:** `resolveIdentity(alias).color === body` untuk semua
