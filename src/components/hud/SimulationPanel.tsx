@@ -16,7 +16,7 @@ import { MoodLogCard } from './TacticalOverlay';
  *
  * Every section brings its own heading, so the panel only supplies the
  * grouping: adding a "Mood" title above `MoodGrid` would duplicate the
- * "Trigger a mood" heading that component already owns.
+ * "Picu mood" heading that component already owns.
  */
 export function SimulationPanel() {
   const simulationMode = useAgentStore((s) => s.simulationMode);

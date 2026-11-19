@@ -269,6 +269,7 @@ function AgentNode({
             </div>
           )}
           <div
+            data-robot-pill
             className="flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 whitespace-nowrap"
             style={{
               backgroundColor: 'rgba(255, 253, 248, 0.94)',
@@ -338,6 +339,80 @@ const CAMERA_POSES: Record<'overview' | 'hub', CameraPose> = {
 
 /** Where the first frame starts, before the intro dolly settles on overview. */
 const CAMERA_INTRO_START = new THREE.Vector3(12.5, 13.0, 15.5);
+
+/** Framing the office was designed at: the vertical fov below assumes this shape. */
+const BASE_FOV = 38;
+const REF_ASPECT = 1.1;
+/**
+ * Where the right-most robot's name pill sits under the reference framing, as a
+ * fraction of the canvas width, and half its width in CSS pixels.
+ *
+ * The pill is a fixed-size DOM element — drei's `<Html>` has no `distanceFactor`
+ * — so it does not shrink with the scene the way the desks do. Both numbers
+ * follow from the camera pose and the desk layout; the layout gate asserts all
+ * four pills stay inside the canvas, so a change to either surfaces at once.
+ */
+const RIGHT_PILL_FRAC = 0.903;
+const RIGHT_PILL_HALF_PX = 60;
+
+/**
+ * Keeps the office framed when the canvas is narrower than the design.
+ *
+ * The camera's fov is vertical, so it is the *horizontal* field that shrinks
+ * when the simulation panel takes 344px off the viewport: at 1024x900 the
+ * canvas is 680x900, and a 38° vertical fov across that aspect crops the
+ * right-most desk (Antigravity) off screen entirely. Widening the vertical fov
+ * instead holds the horizontal field constant, so the whole office fits —
+ * the scene reads as smaller rather than as cut off.
+ *
+ * That alone is enough down to a ~585px canvas. Below it the pills take over:
+ * they keep their pixel width while the canvas shrinks around them, so on a
+ * phone the right-most one overhangs the edge however the desks are framed.
+ * There the field opens up by exactly the ratio that leaves the pill inside.
+ *
+ * Kept out of `CameraRig` on purpose: that effect is mount-only and owns the
+ * intro flight, while this has to re-run on every canvas resize.
+ */
+function fovForViewport(width: number, height: number) {
+  const aspect = width / height;
+  // At or above the reference aspect the baseline framing is already wide
+  // enough for every desk, so wide viewports stay byte-identical to before.
+  if (aspect >= REF_ASPECT) return BASE_FOV;
+
+  const refTan = Math.tan((BASE_FOV * Math.PI) / 360) * REF_ASPECT;
+  // Widening the field by `k` pulls the pill towards the centre in proportion,
+  // landing it at `0.5 + (RIGHT_PILL_FRAC - 0.5) / k`. It fits once that plus
+  // its half-width clears the edge; `k` of 1 means the constant-horizontal-fov
+  // framing already does, which is every canvas wider than ~585px.
+  const room = 0.5 - RIGHT_PILL_HALF_PX / Math.max(width, RIGHT_PILL_HALF_PX * 2);
+  const fit = room > 0 ? (RIGHT_PILL_FRAC - 0.5) / room : 1;
+
+  return (2 * Math.atan((refTan * Math.max(1, fit)) / aspect) * 180) / Math.PI;
+}
+
+/**
+ * Three cameras are imperative objects owned by the renderer, not React state:
+ * the projection is written in place, the way `OrbitControls` writes the
+ * camera transform. A module-scope function keeps that write where lint can
+ * see it is not mutating a value React owns.
+ */
+function applyFov(camera: THREE.Camera, fov: number) {
+  const perspective = camera as THREE.PerspectiveCamera;
+  perspective.fov = fov;
+  perspective.updateProjectionMatrix();
+}
+
+function ResponsiveFov() {
+  const { camera, size, invalidate } = useThree();
+
+  useEffect(() => {
+    applyFov(camera, fovForViewport(size.width, size.height));
+    // `frameloop="demand"`: without this the new projection may never paint.
+    invalidate();
+  }, [camera, size.width, size.height, invalidate]);
+
+  return null;
+}
 
 function CameraRig() {
   const { camera, invalidate } = useThree();
@@ -614,6 +689,7 @@ function World() {
       ))}
 
       <CameraRig />
+      <ResponsiveFov />
     </>
   );
 }

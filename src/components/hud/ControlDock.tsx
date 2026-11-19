@@ -7,6 +7,7 @@ import { cn } from '@/lib/format';
 import { CameraMenu } from './CameraMenu';
 import { ModelToggle } from './ModelToggle';
 import { MoodGrid } from './MoodGrid';
+import { ProviderPicker } from './ProviderPicker';
 import { SoundToggle } from './SoundToggle';
 
 /**
@@ -121,7 +122,17 @@ export function ControlDock() {
       */}
       <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,200px)] sm:grid-rows-[minmax(0,1fr)] sm:gap-3">
         <div className="toy-scroll min-h-0 flex-1 overflow-y-auto">
-          <MoodGrid />
+          {/* The provider list lives in the panel from `lg` up, and this dock is
+              the only surface below it — without it the only way to change
+              provider would be tapping a robot, and off-screen robots are
+              untappable. `shrink-0` keeps it at its natural height inside the
+              scroller so the mood grid below is not squeezed. */}
+          <div className="flex flex-col gap-3">
+            <div className="shrink-0">
+              <ProviderPicker />
+            </div>
+            <MoodGrid />
+          </div>
         </div>
         {/* Camera presets live in the panel from `lg` up; the dock is the only
             place to reach them below it, so it must keep them — compact keeps

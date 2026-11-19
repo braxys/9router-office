@@ -40,10 +40,10 @@ export function MoodGrid({ compact = false }: { compact?: boolean }) {
   const selected = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
 
   return (
-    <section aria-label="Trigger a mood" className="min-w-0">
+    <section aria-label="Picu mood" className="min-w-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <p className="text-[11px] font-bold tracking-wide text-ink-dim uppercase">
-          Trigger a mood
+          Picu mood
         </p>
         <button
           type="button"

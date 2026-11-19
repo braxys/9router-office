@@ -16,7 +16,11 @@
 //   5. all provider rows are visible in the panel without scrolling;
 //   6. the dock never overlaps the top HUD and keeps its header on screen;
 //   7. all three camera presets are visible and enabled, and all four mood
-//      cells are reachable, on whichever surface is visible.
+//      cells are reachable, on whichever surface is visible;
+//   8. the panel is exactly 320px wide at `lg`+, the width the camera framing
+//      is tuned against;
+//   9. all four robot name pills sit fully inside the canvas at every viewport,
+//      so the camera can never crop a desk out of frame.
 //
 // Usage: node scripts/layout-check.mjs        (npm run layout:test)
 //   CDP_PORT=9224            CDP port of the headless Chrome
@@ -29,6 +33,12 @@ const URL = process.env.TARGET_URL ?? 'http://localhost:3001/?capture=1';
 
 /** Tailwind `lg`: the side panel takes over from here, the dock below it. */
 const LG = 1024;
+/**
+ * The panel's fixed width. Together with the 12px of padding on each side of
+ * its wrapper this is the 344px the canvas gives up from `lg` up, so the camera
+ * framing is tuned against it and a drift here re-crops the scene.
+ */
+const PANEL_W = 320;
 /**
  * Tailwind `xl`: `CommandCenter` renders `RobotSpotlightCard` only from here up
  * (`xl:block`). Below it the spotlight would reach the identity card.
@@ -323,6 +333,49 @@ const probe = `(() => {
       }))
     : [];
 
+  /**
+   * The robots' name pills are plain DOM: drei's <Html> portals them next to
+   * the canvas and positions them with a transform from the live projection.
+   * The canvas is the only clip the scene obeys, so a pill outside the canvas
+   * rect is a robot the camera has cropped out of the frame — exactly the
+   * 1024x900 Antigravity bug, which no card-overlap check could see.
+   */
+  const canvasEl = document.querySelector('.canvas-host canvas');
+  const canvasBox = canvasEl ? rect(canvasEl) : null;
+  const pillName = (pill) => {
+    // The name is the pill's middle span; the first is the status dot and the
+    // last is the status label.
+    const spans = [...pill.querySelectorAll('span')];
+    const named = spans.find((s) => s.className.includes('tracking-tight'));
+    return text(named ?? pill).slice(0, 24);
+  };
+  /**
+   * Prefer the pill container's own attribute; fall back to walking up from the
+   * name span by its classes, so a refactor that drops the attribute degrades to
+   * a working check instead of a vacuous pass.
+   */
+  const pillEls = [
+    ...document.querySelectorAll('[data-robot-pill]'),
+  ];
+  if (pillEls.length === 0) {
+    for (const span of document.querySelectorAll(
+      '.canvas-host span.text-\\[10px\\].font-extrabold.tracking-tight',
+    )) {
+      const pill = span.closest('div.rounded-full');
+      if (pill && !pillEls.includes(pill)) pillEls.push(pill);
+    }
+  }
+  const pills = pillEls.map((pill) => {
+    const r = rect(pill);
+    return {
+      name: pillName(pill),
+      rect: r,
+      // drei sets display:none on a pill whose anchor is behind the camera, so
+      // a 0x0 box means the robot is not on screen either.
+      drawn: r.w > 1 && r.h > 1,
+    };
+  });
+
   const dockHeader = dockVisible ? dock.querySelector('header') : null;
   // The panel's footer holds Pause / Reset / Sound / Model. At short viewports
   // the panel is taller than its box and the footer sits below the visible
@@ -362,6 +415,8 @@ const probe = `(() => {
     providers,
     mood,
     cameras,
+    canvas: canvasBox,
+    pills,
   };
 })()`;
 
@@ -513,6 +568,42 @@ for (const { w, h } of VIEWPORTS) {
     }
   }
 
+  // 5b. The panel's width is what makes the canvas narrow, so it is part of the
+  // contract: the 344px it takes (320 + wrapper padding) is the number the
+  // camera framing is tuned against. A wider panel silently re-crops the scene.
+  if (d.panel && Math.abs(d.panel.w - PANEL_W) > 1) {
+    problems.push(`PANEL WIDTH ${d.panel.w} expected ${PANEL_W}`);
+  }
+
+  // 5c. All four robots framed. The pills are plain DOM positioned by the live
+  // projection, so this is the only assertion that can see the camera crop the
+  // office: at 1024x900 a fixed vertical fov pushed Antigravity off the right
+  // edge while every other check stayed green. Non-vacuous by construction — a
+  // missing canvas or a missing pill is a failure, never a skipped check.
+  if (!d.canvas) {
+    problems.push('CANVAS not found — robot framing cannot be measured');
+  } else if (d.pills.length !== 4) {
+    problems.push(`ROBOT PILLS expected 4, found ${d.pills.length}`);
+  } else {
+    for (const pill of d.pills) {
+      const r = pill.rect;
+      const c = d.canvas;
+      if (!pill.drawn) {
+        problems.push(`ROBOT PILL NOT DRAWN "${pill.name}" (0x0 box — robot behind the camera)`);
+      } else if (
+        r.left < c.left - 1 ||
+        r.right > c.right + 1 ||
+        r.top < c.top - 1 ||
+        r.bottom > c.bottom + 1
+      ) {
+        problems.push(
+          `ROBOT PILL OUTSIDE CANVAS "${pill.name}" x${r.left}-${r.right} y${r.top}-${r.bottom} ` +
+            `vs canvas x${c.left}-${c.right} y${c.top}-${c.bottom}`,
+        );
+      }
+    }
+  }
+
   // 6. The dock must not cover the top HUD and must keep its header on screen.
   if (d.dock) {
     for (const [name, card] of [
@@ -576,13 +667,25 @@ for (const { w, h } of VIEWPORTS) {
   const moodOk = d.mood.filter((c) => c.reach.ok && c.labelSpan && c.labelSpan.scroll <= c.labelSpan.client + 1).length;
   const camOk = d.cameras.filter((c) => !c.disabled && c.reach.ok).length;
   const provOk = d.providers.filter((r) => r.reach.ok && r.inPanel).length;
+  const pillsOk = d.canvas
+    ? d.pills.filter(
+        (p) =>
+          p.drawn &&
+          p.rect.left >= d.canvas.left - 1 &&
+          p.rect.right <= d.canvas.right + 1 &&
+          p.rect.top >= d.canvas.top - 1 &&
+          p.rect.bottom <= d.canvas.bottom + 1,
+      ).length
+    : 0;
 
   console.log(
     `${ok ? 'PASS' : 'FAIL'} ${String(d.vw).padStart(4)}x${String(d.vh).padEnd(4)} ` +
       `${surfaceText} cards=${d.panels.length} hudHits=${hudHits} ` +
       `providers=${provOk}/${d.providers.length} mood=${moodOk}/${d.mood.length} cams=${camOk}/${d.cameras.length} ` +
       `vclip=${d.panelClipping.vertical.length} hclip=${d.panelClipping.horizontal.length} ` +
-      `dockOverflow=${d.dockOverflow.length}`,
+      `dockOverflow=${d.dockOverflow.length} ` +
+      `panelW=${d.panel ? d.panel.w : 'off'} ` +
+      `pills=${pillsOk}/${d.pills.length}${d.canvas ? '' : ' (no canvas)'}`,
   );
   for (const k of known) console.log(`       KNOWN ${k}`);
   for (const p of problems) console.log(`       ${p}`);
