@@ -8,7 +8,10 @@ import type { ResolvedIdentity } from '@/lib/providerIdentity';
 import { FACE, HANDS, ROBOT_COLORS, robotNodePosition } from '@/lib/robotModel';
 import { AntennaTopper, RobotParts } from './RobotParts';
 import { RobotEffects } from './RobotEffects';
+import { RobotLegs, applyLegPose } from './RobotLegs';
 import { DESK_SEAT } from './WorkDesk';
+import { createInitialRoamState, stepRoamState } from '@/lib/idleRoamState';
+import { pickNextPoi, worldToSlotLocal } from '@/lib/officePoints';
 
 export interface WorkerRobotProps {
   accentColor: string;
@@ -19,6 +22,14 @@ export interface WorkerRobotProps {
   towardHub: [number, number];
   /** Live throughput; scales parcel volume and speed while streaming. */
   tokensPerSecond: number;
+  /** Optional slot world position for room coordinate mapping. */
+  slotPosition?: readonly [number, number, number];
+  /** Optional slot rotation around Y. */
+  slotRotationY?: number;
+  /** Callback fired with the live local root position. */
+  onPositionChange?: (pos: [number, number, number]) => void;
+  /** Forces the robot to stay seated at the desk (e.g. for testing or GLTF fallback). */
+  disableRoam?: boolean;
 }
 
 /** Springy ease that overshoots slightly — gives everything a toy feel. */
@@ -171,6 +182,10 @@ export function WorkerRobot({
   status,
   towardHub,
   tokensPerSecond,
+  slotPosition,
+  slotRotationY,
+  onPositionChange,
+  disableRoam = false,
 }: WorkerRobotProps) {
   const root = useRef<THREE.Group>(null);
   const torso = useRef<THREE.Group>(null);
@@ -184,6 +199,12 @@ export function WorkerRobot({
   const armR = useRef<THREE.Group>(null);
   const handL = useRef<THREE.Mesh>(null);
   const handR = useRef<THREE.Mesh>(null);
+
+  // Articulated leg joint refs
+  const hipL = useRef<THREE.Group>(null);
+  const kneeL = useRef<THREE.Group>(null);
+  const hipR = useRef<THREE.Group>(null);
+  const kneeR = useRef<THREE.Group>(null);
 
   const isError = status === 'ERROR';
   const isThinking = status === 'THINKING';
@@ -204,6 +225,10 @@ export function WorkerRobot({
     time: 0,
   });
 
+  const roamRef = useRef(createInitialRoamState(DESK_SEAT));
+  const seatedRef = useRef(true);
+  const effectsGroup = useRef<THREE.Group>(null);
+
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05);
     const t = (anim.current.time += dt);
@@ -214,8 +239,71 @@ export function WorkerRobot({
     a.armLiftR = spring(a.armLiftR, isStreaming ? 0.55 : 0, dt, 7);
     a.armLiftL = spring(a.armLiftL, isError ? 1 : 0, dt, 7);
 
-    // ---- Root: seated sway + startle hop --------------------------------
-    if (root.current) {
+    // ---- Idle Roaming & Locomotion Kinematics ----------------------------
+    const isCapture =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).has('capture');
+    const shouldRoam = !disableRoam && !isCapture;
+
+    let isSeated = true;
+    if (shouldRoam) {
+      const roamOutput = stepRoamState(
+        roamRef.current,
+        {
+          status,
+          deskSeat: DESK_SEAT,
+          targetPoi: null,
+          slotPos: slotPosition ?? [0, 0, 0],
+          slotRotY: slotRotationY ?? 0,
+          pickPoi: pickNextPoi,
+          worldToLocal: worldToSlotLocal,
+        },
+        dt,
+      );
+      roamRef.current = roamOutput.nextState;
+      isSeated = roamOutput.isSeated;
+      seatedRef.current = isSeated;
+
+      applyLegPose(
+        {
+          hipL: hipL.current,
+          kneeL: kneeL.current,
+          hipR: hipR.current,
+          kneeR: kneeR.current,
+        },
+        roamOutput.legPose,
+      );
+
+      if (!isSeated && root.current) {
+        root.current.position.set(
+          roamOutput.position[0],
+          roamOutput.position[1],
+          roamOutput.position[2],
+        );
+        root.current.rotation.y = roamOutput.rotationY;
+        root.current.rotation.z = roamOutput.torsoTiltZ;
+      }
+      onPositionChange?.(roamOutput.position);
+    } else {
+      applyLegPose(
+        {
+          hipL: hipL.current,
+          kneeL: kneeL.current,
+          hipR: hipR.current,
+          kneeR: kneeR.current,
+        },
+        {
+          hipL: Math.PI / 2,
+          kneeL: -Math.PI / 2,
+          hipR: Math.PI / 2,
+          kneeR: -Math.PI / 2,
+        },
+      );
+      onPositionChange?.([DESK_SEAT.x, DESK_SEAT.y, DESK_SEAT.z]);
+    }
+
+    // ---- Root: seated sway + startle hop (only when in chair) ------------
+    if (isSeated && root.current) {
       const sway = Math.sin(t * 0.9) * 0.045 * (1 - a.lean) * (1 - a.tilt);
       root.current.rotation.z = sway + a.tilt * 0.06;
       // ERROR: little repeated jumps on the chair
@@ -223,7 +311,7 @@ export function WorkerRobot({
       const hopY = isError ? Math.abs(Math.sin(hopPhase * Math.PI)) * 0.16 : 0;
       const breathe = Math.sin(t * 2.1) * 0.012 * (1 - a.lean);
       // Seated on the chair seat — DESK_SEAT in WorkDesk owns this number.
-      root.current.position.y = DESK_SEAT.y + hopY + breathe;
+      root.current.position.set(0, DESK_SEAT.y + hopY + breathe, DESK_SEAT.z);
       root.current.rotation.y = a.armLiftR * -0.28;
     }
 
@@ -284,37 +372,71 @@ export function WorkerRobot({
     }
 
     // ---- Arms ------------------------------------------------------------
-    // Typing hands hover over the keyboard and jitter.
-    const typeSpeed = isThinking ? 26 : isStreaming ? 14 : 2.4;
-    const typeAmp = isThinking ? 0.05 : isStreaming ? 0.03 : 0.006;
-    const lPhase = t * typeSpeed;
-    const rPhase = t * typeSpeed + 1.9;
+    if (!seatedRef.current) {
+      const roamOutput = roamRef.current;
+      const stride = Math.sin(roamOutput.walkPhase) * 0.45;
+      const swingL =
+        roamOutput.subState === 'DANCE'
+          ? Math.sin(roamOutput.dancePhase) * 0.55
+          : -stride * 0.7;
+      const swingR =
+        roamOutput.subState === 'DANCE'
+          ? -Math.sin(roamOutput.dancePhase) * 0.55
+          : stride * 0.7;
 
-    if (armL.current) {
-      const lift = a.armLiftL;
-      armL.current.rotation.x = -0.35 - lift * 1.5 + Math.sin(lPhase) * typeAmp * 2;
-      armL.current.rotation.z = 0.12 + lift * 0.85;
+      if (armL.current) {
+        armL.current.rotation.x = swingL;
+        armL.current.rotation.z = 0.1;
+      }
+      if (armR.current) {
+        armR.current.rotation.x = swingR;
+        armR.current.rotation.z = -0.1;
+      }
+      if (handL.current) {
+        handL.current.position.y = 0;
+      }
+      if (handR.current) {
+        handR.current.position.y = 0;
+      }
+    } else {
+      // Typing hands hover over the keyboard and jitter.
+      const typeSpeed = isThinking ? 26 : isStreaming ? 14 : 2.4;
+      const typeAmp = isThinking ? 0.05 : isStreaming ? 0.03 : 0.006;
+      const lPhase = t * typeSpeed;
+      const rPhase = t * typeSpeed + 1.9;
+
+      if (armL.current) {
+        const lift = a.armLiftL;
+        armL.current.rotation.x = -0.35 - lift * 1.5 + Math.sin(lPhase) * typeAmp * 2;
+        armL.current.rotation.z = 0.12 + lift * 0.85;
+      }
+      if (armR.current) {
+        const lift = a.armLiftR;
+        armR.current.rotation.x = -0.35 - lift * 1.45 + Math.sin(rPhase) * typeAmp * 2;
+        armR.current.rotation.z = -0.12 - lift * 0.6;
+      }
+      if (handL.current) {
+        handL.current.position.y = Math.sin(lPhase) * typeAmp;
+      }
+      if (handR.current) {
+        handR.current.position.y = Math.sin(rPhase) * typeAmp;
+      }
     }
-    if (armR.current) {
-      const lift = a.armLiftR;
-      armR.current.rotation.x = -0.35 - lift * 1.45 + Math.sin(rPhase) * typeAmp * 2;
-      armR.current.rotation.z = -0.12 - lift * 0.6;
-    }
-    if (handL.current) {
-      handL.current.position.y = Math.sin(lPhase) * typeAmp;
-    }
-    if (handR.current) {
-      handR.current.position.y = Math.sin(rPhase) * typeAmp;
+    if (effectsGroup.current) {
+      effectsGroup.current.visible = seatedRef.current;
     }
   });
 
   return (
     <group ref={root} position={[DESK_SEAT.x, DESK_SEAT.y, DESK_SEAT.z]}>
-      {/* ------------------------------ SEATED LEGS -----------------------
-          The robot sits on the chair; thighs run forward under the desk and
-          shins drop to the floor. Without these the robot reads as floating.
-          Geometry comes from the shared part spec. */}
-      <RobotParts node="root" identity={identity} accent={accentColor} />
+      {/* ------------------------------ ARTICULATED LEGS ------------------- */}
+      <RobotLegs
+        hipLRef={hipL}
+        kneeLRef={kneeL}
+        hipRRef={hipR}
+        kneeRRef={kneeR}
+        accent={accentColor}
+      />
 
       {/* ------------------------------ TORSO ------------------------------ */}
       <group ref={torso}>
@@ -343,6 +465,7 @@ export function WorkerRobot({
         </mesh>
       </group>
 
+      {/* ------------------------------ ARMS ------------------------------ */}
       <group ref={armR} position={[armRX, armRY, armRZ]}>
         <RobotParts node="armR" identity={identity} accent={accentColor} />
         <mesh ref={handR} position={HANDS.position}>
@@ -352,11 +475,13 @@ export function WorkerRobot({
       </group>
 
       {/* ------------------------------ STATE PROPS ----------------------- */}
-      <RobotEffects
-        status={status}
-        towardHub={towardHub}
-        tokensPerSecond={tokensPerSecond}
-      />
+      <group ref={effectsGroup}>
+        <RobotEffects
+          status={status}
+          towardHub={towardHub}
+          tokensPerSecond={tokensPerSecond}
+        />
+      </group>
     </group>
   );
 }
