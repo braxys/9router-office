@@ -13,6 +13,7 @@ import { AGENT_SLOTS, STATUS_META } from '@/lib/agents';
 import { ROBOT_ENVELOPE_TOP } from '@/lib/robotModel';
 import { resolveIdentity } from '@/lib/providerIdentity';
 import { markFrame } from '@/lib/renderStats';
+import { visibleSceneWidth } from '@/lib/hudLayout';
 import { useModelChoice } from '@/lib/modelChoice';
 import {
   isCameraAnimating,
@@ -24,6 +25,7 @@ import { WorkerRobot } from './WorkerRobot';
 import { WorkDesk, DESK_SEAT } from './WorkDesk';
 import { CentralHub } from './CentralHub';
 import { OfficeRoom } from './OfficeRoom';
+import { slotLocalToWorld } from '@/lib/officePoints';
 
 /**
  * The `.glb` body is a separate chunk: `GLTFLoader` is only fetched when someone
@@ -186,6 +188,9 @@ function SceneBridge() {
 /*  Per-agent node                                                            */
 /* -------------------------------------------------------------------------- */
 
+/** Live world coordinates of each robot, used by the camera focus preset. */
+export const agentLiveWorldPositions = new Map<string, [number, number, number]>();
+
 function AgentNode({
   id,
   chairColor,
@@ -199,6 +204,26 @@ function AgentNode({
   model: { url: string } | null;
 }) {
   const group = useRef<THREE.Group>(null);
+  const pillGroup = useRef<THREE.Group>(null);
+  const ringMesh = useRef<THREE.Mesh>(null);
+  const mobileShadow = useRef<THREE.Group>(null);
+  const robotLocalPos = useRef<[number, number, number]>([0, DESK_SEAT.y, DESK_SEAT.z]);
+
+  const handlePositionChange = useCallback(
+    (pos: [number, number, number]) => {
+      robotLocalPos.current = pos;
+      const worldPos = slotLocalToWorld(pos, slot.position, slot.rotationY);
+      agentLiveWorldPositions.set(id, worldPos);
+    },
+    [id, slot.position, slot.rotationY],
+  );
+
+  useEffect(() => {
+    return () => {
+      agentLiveWorldPositions.delete(id);
+    };
+  }, [id]);
+
   const selected = useAgentStore((s) => s.selectedAgentId === id);
   const selectAgent = useAgentStore((s) => s.selectAgent);
   // Primitive selectors: a telemetry tick that only moves latency must not
@@ -316,6 +341,21 @@ function AgentNode({
     const target = selected ? 1.04 : 1;
     const s = group.current.scale.x + (target - group.current.scale.x) * Math.min(1, dt * 6);
     group.current.scale.setScalar(s);
+
+    const [lx, ly, lz] = robotLocalPos.current;
+    if (pillGroup.current) {
+      pillGroup.current.position.set(
+        lx,
+        ly + (PILL_Y - DESK_SEAT.y),
+        lz + (PILL_Z - DESK_SEAT.z),
+      );
+    }
+    if (ringMesh.current) {
+      ringMesh.current.position.set(lx, 0.03, lz + 0.3);
+    }
+    if (mobileShadow.current) {
+      mobileShadow.current.position.set(lx, 0.005, lz);
+    }
   });
 
   return (
@@ -347,6 +387,9 @@ function AgentNode({
               status={status}
               towardHub={towardHub}
               tokensPerSecond={tokensPerSecond}
+              slotPosition={slot.position}
+              slotRotationY={slot.rotationY}
+              onPositionChange={handlePositionChange}
             />
           }
         />
@@ -357,87 +400,89 @@ function AgentNode({
           status={status}
           towardHub={towardHub}
           tokensPerSecond={tokensPerSecond}
+          slotPosition={slot.position}
+          slotRotationY={slot.rotationY}
+          onPositionChange={handlePositionChange}
         />
       )}
 
-      {/* name + mood pill, floating over the robot's antenna.
-          No `distanceFactor`: drei then keeps the pill at a constant CSS size,
-          so it stays legible in the overview and does not balloon when the
-          camera flies in for a focus shot.
-
-          `center` is NOT used. It centres the element on the anchor, which drops
-          half the pill (27 px ≈ 0.19 m here) back down over the topper the
-          identity exists to show. Instead the wrapper is shifted up by its own
-          height, so the pill's bottom edge sits on the envelope anchor. */}
-      <Html
-        position={[0, PILL_Y, PILL_Z]}
-        zIndexRange={[15, 0]}
-        pointerEvents="none"
-        style={{ pointerEvents: 'none' }}
-      >
-        <div style={{ position: 'relative', transform: 'translate(-50%, -100%)' }}>
-          {showBubble && (
+      {/* name + mood pill, floating over the robot's antenna and tracking movement */}
+      <group ref={pillGroup} position={[0, PILL_Y, PILL_Z]}>
+        <Html
+          position={[0, 0, 0]}
+          zIndexRange={[15, 0]}
+          pointerEvents="none"
+          style={{ pointerEvents: 'none' }}
+        >
+          <div style={{ position: 'relative', transform: 'translate(-50%, -100%)' }}>
+            {showBubble && (
+              <div
+                ref={attachBubbleGuard}
+                className="absolute bottom-[calc(100%+8px)] left-1/2 flex w-max max-w-[210px] -translate-x-1/2 items-start gap-1.5 rounded-2xl border-2 px-2 py-1.5"
+                style={{
+                  backgroundColor: 'rgba(255, 253, 248, 0.97)',
+                  borderColor: '#FF6B7A',
+                  boxShadow: '0 2px 0 #FF6B7A33',
+                  pointerEvents: 'auto',
+                }}
+              >
+                <span className="text-[10px] leading-tight font-extrabold text-[#c23a4c]">
+                  {lastError}
+                </span>
+                <button
+                  type="button"
+                  data-error-dismiss
+                  aria-label={`Dismiss error for ${name}`}
+                  className="shrink-0 cursor-pointer rounded-full px-1 text-[10px] leading-none font-extrabold text-[#c23a4c] hover:bg-[#FF6B7A]/15"
+                >
+                  ✕
+                </button>
+                <span
+                  className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[6px] border-x-transparent"
+                  style={{ borderTopColor: '#FF6B7A' }}
+                  aria-hidden
+                />
+              </div>
+            )}
             <div
-              ref={attachBubbleGuard}
-              className="absolute bottom-[calc(100%+8px)] left-1/2 flex w-max max-w-[210px] -translate-x-1/2 items-start gap-1.5 rounded-2xl border-2 px-2 py-1.5"
+              data-robot-pill={id}
+              className="flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 whitespace-nowrap"
               style={{
-                backgroundColor: 'rgba(255, 253, 248, 0.97)',
-                borderColor: '#FF6B7A',
-                boxShadow: '0 2px 0 #FF6B7A33',
-                pointerEvents: 'auto',
+                backgroundColor: 'rgba(255, 253, 248, 0.94)',
+                borderColor: `${STATUS_META[status].color}88`,
+                boxShadow: `0 2px 0 ${STATUS_META[status].color}33`,
               }}
             >
-              <span className="text-[10px] leading-tight font-extrabold text-[#c23a4c]">
-                {lastError}
-              </span>
-              <button
-                type="button"
-                data-error-dismiss
-                aria-label={`Dismiss error for ${name}`}
-                className="shrink-0 cursor-pointer rounded-full px-1 text-[10px] leading-none font-extrabold text-[#c23a4c] hover:bg-[#FF6B7A]/15"
-              >
-                ✕
-              </button>
               <span
-                className="absolute top-full left-1/2 h-0 w-0 -translate-x-1/2 border-x-[5px] border-t-[6px] border-x-transparent"
-                style={{ borderTopColor: '#FF6B7A' }}
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: STATUS_META[status].color }}
                 aria-hidden
               />
+              <span className="text-[10px] font-extrabold tracking-tight text-ink-strong">
+                {name}
+              </span>
+              <span
+                className="text-[9px] font-extrabold tracking-wide uppercase"
+                style={{ color: STATUS_META[status].color }}
+              >
+                {STATUS_META[status].label}
+              </span>
             </div>
-          )}
-          <div
-            data-robot-pill={id}
-            className="flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 whitespace-nowrap"
-            style={{
-              backgroundColor: 'rgba(255, 253, 248, 0.94)',
-              borderColor: `${STATUS_META[status].color}88`,
-              boxShadow: `0 2px 0 ${STATUS_META[status].color}33`,
-            }}
-          >
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: STATUS_META[status].color }}
-              aria-hidden
-            />
-            <span className="text-[10px] font-extrabold tracking-tight text-ink-strong">
-              {name}
-            </span>
-            <span
-              className="text-[9px] font-extrabold tracking-wide uppercase"
-              style={{ color: STATUS_META[status].color }}
-            >
-              {STATUS_META[status].label}
-            </span>
           </div>
-        </div>
-      </Html>
+        </Html>
+      </group>
 
       {/* fake blob shadow under robot + desk */}
       <BlobShadow position={[0, 0, 0]} radius={0.9} opacity={0.15} />
 
-      {/* selection ring on the floor */}
+      {/* mobile shadow under roaming robot */}
+      <group ref={mobileShadow} position={[0, 0.005, DESK_SEAT.z]}>
+        <BlobShadow position={[0, 0, 0]} radius={0.7} opacity={0.16} />
+      </group>
+
+      {/* selection ring on the floor tracking the robot */}
       {selected && (
-        <mesh position={[0, 0.03, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh ref={ringMesh} position={[0, 0.03, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[1.05, 1.2, 40]} />
           <meshBasicMaterial color={accentColor} transparent opacity={0.55} />
         </mesh>
@@ -503,14 +548,19 @@ const RIGHT_PILL_HALF_PX = 90;
  * Keeps the office framed on any canvas the HUD hands the scene.
  *
  * The camera's fov is vertical, so it is the *horizontal* field that shrinks
- * when the simulation panel takes 344px off the viewport: at 1024x900 the
- * canvas is 680x900, and a 38° vertical fov across that aspect crops the
+ * when the visible scene gets narrower: at 1024x900 the visible area is
+ * 680x900, and a 38° vertical fov across that aspect crops the
  * right-most desk (Antigravity) off screen entirely. Widening the vertical fov
  * instead holds the horizontal field constant, so the whole office fits —
  * the scene reads as smaller rather than as cut off. That constant-horizontal
  * framing is enough for the *desks* at every size, but not for the pills: they
- * keep their pixel width while the canvas shrinks around them, so the field
- * also has to open up by whatever ratio leaves the right-most pill inside.
+ * keep their pixel width while the visible area shrinks around them, so the
+ * field also has to open up by whatever ratio leaves the right-most pill inside.
+ *
+ * `width` is the *visible* width, not the canvas width: the canvas is
+ * full-bleed behind the panel, so `visibleSceneWidth()` subtracts the panel's
+ * footprint first. Framing against the raw canvas would centre the office under
+ * the panel instead of in the area the user can actually see.
  *
  * Kept out of `CameraRig` on purpose: that effect is mount-only and owns the
  * intro flight, while this has to re-run on every canvas resize.
@@ -552,27 +602,69 @@ function isPerspectiveCamera(camera: THREE.Camera): camera is THREE.PerspectiveC
  * the projection is written in place, the way `OrbitControls` writes the
  * camera transform. A module-scope function keeps that write where lint can
  * see it is not mutating a value React owns.
+ *
+ * The projection keeps the *visible* framing identical to the pre full-bleed
+ * layout and extends it under the panel:
+ *
+ *   1. `fov` is chosen for the visible box, so the office is framed exactly as
+ *      it was when the canvas itself was that narrow.
+ *   2. A wider *virtual* frustum plus `setViewOffset` renders the canvas as the
+ *      sub-rectangle of that virtual image, shifted right by the occluded
+ *      strip. The camera axis therefore stays centred in the visible area, and
+ *      the extra width on the right continues the same projection — floor and
+ *      wall under the sidebar.
  */
-function applyFov(camera: THREE.Camera, fov: number) {
-  // Only a perspective camera has an fov to write. `camera` is whatever the
+function applyProjection(
+  camera: THREE.Camera,
+  canvasWidth: number,
+  height: number,
+  collapsed: boolean,
+) {
+  // Only a perspective camera has a fov to write. `camera` is whatever the
   // renderer was created with, so an orthographic one would silently accept a
   // nonsense projection here.
   if (!isPerspectiveCamera(camera)) return;
-  camera.fov = fov;
+
+  const visibleWidth = visibleSceneWidth(canvasWidth, collapsed);
+  // No occluded strip (below `lg`, or a viewport narrower than the panel): the
+  // canvas is entirely visible, so the plain projection is exactly right.
+  if (visibleWidth <= 0 || visibleWidth >= canvasWidth) {
+    camera.aspect = canvasWidth / height;
+    camera.fov = fovForViewport(canvasWidth, height);
+    camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+    return;
+  }
+
+  // The occluded strip, and the virtual image wide enough to hold the canvas
+  // *plus* that strip to the left of the visible region. With
+  // `Wv = 2*canvasWidth - visibleWidth`, the sub-rectangle starting at
+  // `occluded` is `canvasWidth` wide and its centre lands exactly
+  // `visibleWidth/2` from the canvas' left edge — the centre of the visible
+  // area, which is where the original view had the camera axis. A plain wider
+  // fov would instead centre the axis on the canvas and slide the office under
+  // the panel.
+  const occluded = canvasWidth - visibleWidth;
+  const virtualWidth = 2 * canvasWidth - visibleWidth;
+
+  camera.aspect = virtualWidth / height;
+  camera.fov = fovForViewport(visibleWidth, height);
+  camera.setViewOffset(virtualWidth, height, occluded, 0, canvasWidth, height);
   camera.updateProjectionMatrix();
 }
 
 function ResponsiveFov() {
   const { camera, size, invalidate } = useThree();
+  const panelCollapsed = useUiStore((s) => s.panelCollapsed);
 
   // Layout effect, not a passive one: the Canvas mounts with `fov: 38` and the
   // correction has to be in place for the *first* paint, or the scene pops as
   // the framing snaps on the frame after. Cannot SSR — `Scene` is `ssr: false`.
   useLayoutEffect(() => {
-    applyFov(camera, fovForViewport(size.width, size.height));
+    applyProjection(camera, size.width, size.height, panelCollapsed);
     // `frameloop="demand"`: without this the new projection may never paint.
     invalidate();
-  }, [camera, size.width, size.height, invalidate]);
+  }, [camera, size.width, size.height, panelCollapsed, invalidate]);
 
   return null;
 }
@@ -646,13 +738,15 @@ function CameraRig() {
     () =>
       subscribeCamera((preset: CameraPreset) => {
         if (preset === 'focus') {
-          // Aim at the selected desk from the front, just past minDistance.
+          // Aim at the selected robot or desk from the front, just past minDistance.
           const state = useAgentStore.getState();
+          const selectedId = state.selectedAgentId;
+          const livePos = selectedId ? agentLiveWorldPositions.get(selectedId) : null;
           const index = Math.max(
             0,
-            state.agents.findIndex((a) => a.id === state.selectedAgentId),
+            state.agents.findIndex((a) => a.id === selectedId),
           );
-          const [x, , z] = AGENT_SLOTS[index % AGENT_SLOTS.length].position;
+          const [x, , z] = livePos ?? AGENT_SLOTS[index % AGENT_SLOTS.length].position;
           focusPos.current.set(x * 1.35, 3.8, z + 6.8);
           focusTarget.current.set(x, 1.05, z);
           beginFlight(focusPos.current, focusTarget.current, CAMERA_FLIGHT_S);
