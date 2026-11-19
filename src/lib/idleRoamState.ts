@@ -66,14 +66,15 @@ export interface RoamOutput {
 }
 
 export const ROAM_KINEMATICS = {
-  standingRootY: 0.66,
+  standingRootY: 0.72,
   seatedRootY: 0.4,
-  seatedHipAngle: Math.PI / 2,
-  seatedKneeAngle: -Math.PI / 2,
+  seatedHipAngle: -Math.PI / 2,
+  seatedKneeAngle: Math.PI / 2,
   tStand: 0.8,
   tSit: 0.6,
   walkSpeed: 1.35,
   sprintSpeed: 3.2,
+  deskEntryZ: -0.65,
 } as const;
 
 /**
@@ -88,7 +89,7 @@ export function createInitialRoamState(deskSeat: {
     subState: 'SEATED',
     position: [0, deskSeat.y, deskSeat.z],
     rotationY: 0,
-    targetLocal: [0, ROAM_KINEMATICS.standingRootY, -0.2],
+    targetLocal: [0, ROAM_KINEMATICS.standingRootY, ROAM_KINEMATICS.deskEntryZ],
     currentPoi: null,
     timer: 0,
     walkPhase: 0,
@@ -147,17 +148,22 @@ export function stepRoamState(
   let armSwingR = 0;
   let torsoTiltZ = 0;
 
-  // Interruption: when working and away from chair, immediately sprint back
-  if (isWorking && subState !== 'SEATED' && subState !== 'SIT_DOWN') {
-    subState = 'SPRINT_BACK';
-    targetLocal = [0, ROAM_KINEMATICS.standingRootY, -0.25];
-  }
-
   const deskEntry: [number, number, number] = [
     0,
     ROAM_KINEMATICS.standingRootY,
-    -0.25,
+    ROAM_KINEMATICS.deskEntryZ,
   ];
+
+  // Interruption handling
+  if (isWorking && subState !== 'SEATED' && subState !== 'SIT_DOWN') {
+    if (subState === 'STAND_UP') {
+      subState = 'SIT_DOWN';
+      timer = (1 - Math.min(1, timer / ROAM_KINEMATICS.tStand)) * ROAM_KINEMATICS.tSit;
+    } else {
+      subState = 'SPRINT_BACK';
+      targetLocal = deskEntry;
+    }
+  }
 
   switch (subState) {
     case 'SEATED': {
@@ -172,8 +178,8 @@ export function stepRoamState(
 
       if (!isWorking && timer >= nextRoamDelay) {
         subState = 'STAND_UP';
-        timer = 0;
         const seed = Math.floor((ctx.seed ?? 1) * 1000 + timer);
+        timer = 0;
         const poi =
           ctx.targetPoi ??
           (ctx.pickPoi ? ctx.pickPoi(currentPoi?.id ?? null, seed) : null);
@@ -193,7 +199,7 @@ export function stepRoamState(
       position[0] = 0;
       position[1] =
         deskSeat.y + (ROAM_KINEMATICS.standingRootY - deskSeat.y) * tSmooth;
-      position[2] = deskSeat.z + (-0.25 - deskSeat.z) * tSmooth;
+      position[2] = deskSeat.z + (ROAM_KINEMATICS.deskEntryZ - deskSeat.z) * tSmooth;
 
       const hipAngle = ROAM_KINEMATICS.seatedHipAngle * (1 - tSmooth);
       const kneeAngle = ROAM_KINEMATICS.seatedKneeAngle * (1 - tSmooth);
@@ -259,6 +265,22 @@ export function stepRoamState(
       speed = 0;
       position[1] = ROAM_KINEMATICS.standingRootY;
       legPose = { hipL: 0, kneeL: 0, hipR: 0, kneeR: 0 };
+
+      // Orient toward POI lookAt target if available
+      if (currentPoi) {
+        const toLocal = ctx.worldToLocal ?? defaultWorldToSlotLocal;
+        const lookLocal = toLocal(currentPoi.lookAtPos, slotPos, slotRotY);
+        const dxLook = lookLocal[0] - position[0];
+        const dzLook = lookLocal[2] - position[2];
+        if (Math.hypot(dxLook, dzLook) > 0.1) {
+          const targetAngle = Math.atan2(dxLook, dzLook);
+          const angleDiff = Math.atan2(
+            Math.sin(targetAngle - rotationY),
+            Math.cos(targetAngle - rotationY),
+          );
+          rotationY += angleDiff * Math.min(1, dt * 6);
+        }
+      }
 
       const sway = Math.sin(timer * 1.8) * 0.04;
       torsoTiltZ = sway;
@@ -343,13 +365,15 @@ export function stepRoamState(
       const p = Math.min(1, timer / ROAM_KINEMATICS.tSit);
       const tSmooth = p * p * (3 - 2 * p);
 
-      position[0] = 0;
+      position[0] = position[0] * (1 - Math.min(1, dt * 12));
       position[1] =
         ROAM_KINEMATICS.standingRootY +
         (deskSeat.y - ROAM_KINEMATICS.standingRootY) * tSmooth;
-      position[2] = -0.25 + (deskSeat.z - -0.25) * tSmooth;
+      position[2] =
+        ROAM_KINEMATICS.deskEntryZ +
+        (deskSeat.z - ROAM_KINEMATICS.deskEntryZ) * tSmooth;
 
-      rotationY = rotationY * (1 - tSmooth);
+      rotationY = rotationY * (1 - Math.min(1, dt * 8));
 
       const hipAngle = ROAM_KINEMATICS.seatedHipAngle * tSmooth;
       const kneeAngle = ROAM_KINEMATICS.seatedKneeAngle * tSmooth;

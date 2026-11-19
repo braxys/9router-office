@@ -227,7 +227,12 @@ export function WorkerRobot({
 
   const roamRef = useRef(createInitialRoamState(DESK_SEAT));
   const seatedRef = useRef(true);
+  const roamArmRef = useRef({ l: 0, r: 0 });
   const effectsGroup = useRef<THREE.Group>(null);
+  const isCapture = useRef(
+    typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).has('capture'),
+  ).current;
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -240,9 +245,6 @@ export function WorkerRobot({
     a.armLiftL = spring(a.armLiftL, isError ? 1 : 0, dt, 7);
 
     // ---- Idle Roaming & Locomotion Kinematics ----------------------------
-    const isCapture =
-      typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).has('capture');
     const shouldRoam = !disableRoam && !isCapture;
 
     let isSeated = true;
@@ -263,6 +265,8 @@ export function WorkerRobot({
       roamRef.current = roamOutput.nextState;
       isSeated = roamOutput.isSeated;
       seatedRef.current = isSeated;
+      roamArmRef.current.l = roamOutput.armSwingL;
+      roamArmRef.current.r = roamOutput.armSwingR;
 
       applyLegPose(
         {
@@ -285,6 +289,8 @@ export function WorkerRobot({
       }
       onPositionChange?.(roamOutput.position);
     } else {
+      isSeated = true;
+      seatedRef.current = true;
       applyLegPose(
         {
           hipL: hipL.current,
@@ -293,10 +299,10 @@ export function WorkerRobot({
           kneeR: kneeR.current,
         },
         {
-          hipL: Math.PI / 2,
-          kneeL: -Math.PI / 2,
-          hipR: Math.PI / 2,
-          kneeR: -Math.PI / 2,
+          hipL: -Math.PI / 2,
+          kneeL: Math.PI / 2,
+          hipR: -Math.PI / 2,
+          kneeR: Math.PI / 2,
         },
       );
       onPositionChange?.([DESK_SEAT.x, DESK_SEAT.y, DESK_SEAT.z]);
@@ -373,23 +379,12 @@ export function WorkerRobot({
 
     // ---- Arms ------------------------------------------------------------
     if (!seatedRef.current) {
-      const roamOutput = roamRef.current;
-      const stride = Math.sin(roamOutput.walkPhase) * 0.45;
-      const swingL =
-        roamOutput.subState === 'DANCE'
-          ? Math.sin(roamOutput.dancePhase) * 0.55
-          : -stride * 0.7;
-      const swingR =
-        roamOutput.subState === 'DANCE'
-          ? -Math.sin(roamOutput.dancePhase) * 0.55
-          : stride * 0.7;
-
       if (armL.current) {
-        armL.current.rotation.x = swingL;
+        armL.current.rotation.x = roamArmRef.current.l;
         armL.current.rotation.z = 0.1;
       }
       if (armR.current) {
-        armR.current.rotation.x = swingR;
+        armR.current.rotation.x = roamArmRef.current.r;
         armR.current.rotation.z = -0.1;
       }
       if (handL.current) {

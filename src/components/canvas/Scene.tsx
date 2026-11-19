@@ -25,7 +25,6 @@ import { WorkerRobot } from './WorkerRobot';
 import { WorkDesk, DESK_SEAT } from './WorkDesk';
 import { CentralHub } from './CentralHub';
 import { OfficeRoom } from './OfficeRoom';
-import { slotLocalToWorld } from '@/lib/officePoints';
 
 /**
  * The `.glb` body is a separate chunk: `GLTFLoader` is only fetched when someone
@@ -208,17 +207,28 @@ function AgentNode({
   const ringMesh = useRef<THREE.Mesh>(null);
   const mobileShadow = useRef<THREE.Group>(null);
   const robotLocalPos = useRef<[number, number, number]>([0, DESK_SEAT.y, DESK_SEAT.z]);
+  const liveTuple = useRef<[number, number, number]>([
+    slot.position[0],
+    slot.position[1],
+    slot.position[2],
+  ]);
 
   const handlePositionChange = useCallback(
     (pos: [number, number, number]) => {
       robotLocalPos.current = pos;
-      const worldPos = slotLocalToWorld(pos, slot.position, slot.rotationY);
-      agentLiveWorldPositions.set(id, worldPos);
+      const cos = Math.cos(slot.rotationY);
+      const sin = Math.sin(slot.rotationY);
+      const t = liveTuple.current;
+      t[0] = pos[0] * cos + pos[2] * sin + slot.position[0];
+      t[1] = pos[1] + slot.position[1];
+      t[2] = -pos[0] * sin + pos[2] * cos + slot.position[2];
+      agentLiveWorldPositions.set(id, t);
     },
     [id, slot.position, slot.rotationY],
   );
 
   useEffect(() => {
+    agentLiveWorldPositions.set(id, liveTuple.current);
     return () => {
       agentLiveWorldPositions.delete(id);
     };
@@ -351,7 +361,7 @@ function AgentNode({
       );
     }
     if (ringMesh.current) {
-      ringMesh.current.position.set(lx, 0.03, lz + 0.3);
+      ringMesh.current.position.set(lx, 0.03, lz);
     }
     if (mobileShadow.current) {
       mobileShadow.current.position.set(lx, 0.005, lz);
@@ -482,7 +492,7 @@ function AgentNode({
 
       {/* selection ring on the floor tracking the robot */}
       {selected && (
-        <mesh ref={ringMesh} position={[0, 0.03, 0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh ref={ringMesh} position={[0, 0.03, DESK_SEAT.z]} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry args={[1.05, 1.2, 40]} />
           <meshBasicMaterial color={accentColor} transparent opacity={0.55} />
         </mesh>
@@ -626,11 +636,12 @@ function applyProjection(
   if (!isPerspectiveCamera(camera)) return;
 
   const visibleWidth = visibleSceneWidth(canvasWidth, collapsed);
+  const safeHeight = Math.max(1, height);
   // No occluded strip (below `lg`, or a viewport narrower than the panel): the
   // canvas is entirely visible, so the plain projection is exactly right.
   if (visibleWidth <= 0 || visibleWidth >= canvasWidth) {
-    camera.aspect = canvasWidth / height;
-    camera.fov = fovForViewport(canvasWidth, height);
+    camera.aspect = canvasWidth / safeHeight;
+    camera.fov = fovForViewport(canvasWidth, safeHeight);
     camera.clearViewOffset();
     camera.updateProjectionMatrix();
     return;
@@ -647,9 +658,9 @@ function applyProjection(
   const occluded = canvasWidth - visibleWidth;
   const virtualWidth = 2 * canvasWidth - visibleWidth;
 
-  camera.aspect = virtualWidth / height;
-  camera.fov = fovForViewport(visibleWidth, height);
-  camera.setViewOffset(virtualWidth, height, occluded, 0, canvasWidth, height);
+  camera.aspect = virtualWidth / safeHeight;
+  camera.fov = fovForViewport(visibleWidth, safeHeight);
+  camera.setViewOffset(virtualWidth, safeHeight, occluded, 0, canvasWidth, safeHeight);
   camera.updateProjectionMatrix();
 }
 
@@ -747,7 +758,9 @@ function CameraRig() {
             state.agents.findIndex((a) => a.id === selectedId),
           );
           const [x, , z] = livePos ?? AGENT_SLOTS[index % AGENT_SLOTS.length].position;
-          focusPos.current.set(x * 1.35, 3.8, z + 6.8);
+          const camX = Math.max(-8.5, Math.min(8.5, x * 1.25));
+          const camZ = Math.max(-8.5, Math.min(8.5, z + 6.8));
+          focusPos.current.set(camX, 3.8, camZ);
           focusTarget.current.set(x, 1.05, z);
           beginFlight(focusPos.current, focusTarget.current, CAMERA_FLIGHT_S);
           return;

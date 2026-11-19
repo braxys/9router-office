@@ -8,10 +8,10 @@ export const LEG_KINEMATICS = {
   thighLength: 0.4,
   shinLength: 0.4,
   footHeight: 0.12,
-  standingRootY: 0.66,
+  standingRootY: 0.72,
   seatedRootY: 0.4,
-  seatedHipAngle: Math.PI / 2,
-  seatedKneeAngle: -Math.PI / 2,
+  seatedHipAngle: -Math.PI / 2,
+  seatedKneeAngle: Math.PI / 2,
 } as const;
 
 export interface LegPose {

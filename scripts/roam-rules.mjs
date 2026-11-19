@@ -49,9 +49,10 @@ check('pickNextPoi does not repeat previous POI', p1.id !== p2.id, true);
 console.log('\n--- Task 2: Articulated Legs Geometry & Kinematics ---\n');
 import { LEG_KINEMATICS } from '../src/lib/robotLegsModel.ts';
 
-check('LEG_KINEMATICS.standingRootY is defined and positive', LEG_KINEMATICS.standingRootY > 0.5, true);
+check('LEG_KINEMATICS.standingRootY matches total leg drop (0.72)', LEG_KINEMATICS.standingRootY, 0.72);
 check('LEG_KINEMATICS.hipPivotY is 0.2', LEG_KINEMATICS.hipPivotY, 0.2);
-check('LEG_KINEMATICS.seatedHipAngle is PI / 2', Math.abs(LEG_KINEMATICS.seatedHipAngle - Math.PI / 2) < 0.001, true);
+check('LEG_KINEMATICS.seatedHipAngle is -PI / 2', Math.abs(LEG_KINEMATICS.seatedHipAngle - (-Math.PI / 2)) < 0.001, true);
+check('LEG_KINEMATICS.seatedKneeAngle is +PI / 2', Math.abs(LEG_KINEMATICS.seatedKneeAngle - (Math.PI / 2)) < 0.001, true);
 
 console.log('\n--- Task 3: Idle Roam State Machine ---\n');
 import {
