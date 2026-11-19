@@ -45,9 +45,31 @@ place.
   `SphereGeometry` antenna ball. No imported models, no skeletal animation.
 - Animation channels (`lean`, `tilt`, `hop`, `armLiftL/R`) are spring-smoothed in a `useRef` bag so
   status changes blend instead of snapping.
-- Per-provider body colours come from `PROVIDER_META` in `routerAdapter.ts` (e.g. Antigravity
-  `#5CB8F2`, CodeBuddy `#FF9D5C`, Codex `#58D6A9`, OpenCode `#7C9CFF`); unknown providers get a
-  stable hash-derived colour. Limbs derive a darker shade at runtime.
+
+### Per-provider identity
+
+Every known provider gets a **silhouette**, not just a colour swap. Three shape tables in
+`src/lib/robotModel.ts` — `SHELLS` (head crest), `TOPPERS` (antenna topper) and `EMBLEMS` (chest
+badge) — are keyed by `IdentityId`. `src/lib/providerIdentity.ts` maps a provider key to a
+`ResolvedIdentity` (`id`, `color`, optional `accent2`, `shell`, `topper`, `emblem`) and is the only
+place provider strings are matched; the resolved identity travels on telemetry
+(`AgentTelemetry.identity`) so no component has to look a provider up at render time.
+
+A provider whose logo the project does not know resolves to `default`: the shared body, the yellow
+antenna ball, and a stable hash-derived colour (`UNKNOWN_PROVIDER_COLORS`). Adding a provider is a
+data edit — one entry in the identity table plus any new shape rows — with no change to the rig.
+
+Both bodies read the same tables. The procedural rig renders `RobotParts` (shared body) plus
+`RobotIdentityParts` (identity only); the `.glb` path already carries the baked shared body, so it
+mounts **only** `RobotIdentityParts`, portal-ed onto the model's own `head` / `torso` / `antenna`
+joints — a shell has to follow the head when it looks around and tilts on `ERROR`. When a topper
+replaces the ball, the baked `antennaBall` mesh is hidden. The topper's pulse lives in a wrapper
+group so every identity keeps the ball's old "alive" feel.
+
+Identity geometry is bounded by three exported envelopes (`SHELL_ENVELOPE`, `TOPPER_ENVELOPE`,
+`EMBLEM_ENVELOPE`) unioned into `ROBOT_ENVELOPE_TOP` / `ROBOT_ENVELOPE_HEIGHT`. Those drive the name
+pill anchor; `ROBOT_HEIGHT` (2.365 m) stays the body height that the `.glb` build asserts. A topper
+that grows therefore lifts the pill on its own instead of growing into it.
 
 ## 3. Scene Composition
 ```text
@@ -73,6 +95,21 @@ Scene (Canvas, NeutralToneMapping, dpr=1, antialias=false, frameloop="demand")
 ├── AgentNode ×4  (WorkDesk + WorkerRobot + <Html> name/status pill, click to select)
 └── CameraRig     intro dolly → OrbitControls, plus overview / hub / focus presets
 ```
+
+The name pill's anchor is derived, not hardcoded: `PILL_Y = DESK_SEAT.y + ROBOT_ENVELOPE_TOP +
+TOPPER_ANIMATION_LIFT + 0.1`, and its depth is `PILL_Z = DESK_SEAT.z` — the antenna's plane, not the
+group origin. Both details are load-bearing. `<Html center>` centres the element on the anchor, which
+drops half the pill (27 px ≈ 0.19 m here) back over the topper; the wrapper is instead shifted by its
+own height so the pill's bottom edge sits on the anchor. And because the desks sit ~0.48 m behind the
+group origin while the camera looks down from the front, a pill at the origin projects *lower* on
+screen than the topper it should float above — close enough to cover it. `TOPPER_ANIMATION_LIFT`
+(0.05 m) covers the idle head bob and antenna wobble, which lift a tall topper ~0.047 m above its
+rest-pose envelope.
+
+`SceneBridge` (only mounted under `?capture=1`) publishes `window.__office` — scene, camera and a
+`robots` getter over a registry of mounted desk groups — so `identity-render.mjs` can walk the live
+graph. It is a getter rather than a snapshot because the gate polls it and a snapshot would go stale
+as soon as a desk mounts or the roster ticks.
 
 ### Camera presets
 `src/lib/cameraBus.ts` is a DOM-level pub/sub so the HUD can ask the canvas to fly somewhere
@@ -116,6 +153,7 @@ src/
 │   │   ├── OfficeRoom.tsx   floor, rug, walls, windows, props, plants
 │   │   ├── WorkDesk.tsx     desk, monitor, keyboard, mug, papers, chair, DESK_SEAT
 │   │   ├── WorkerRobot.tsx  procedural robot rig (the default body)
+│   │   ├── RobotParts.tsx   part-spec renderer + identity-only variant + AntennaTopper
 │   │   ├── ModelRobot.tsx   opt-in `.glb` body: imperative loader, clone tinting, same animation
 │   │   ├── RobotEffects.tsx per-status comedy FX shared by both bodies
 │   │   └── CentralHub.tsx   9ROUTER CORE server desk / tube hub
@@ -131,9 +169,10 @@ src/
 │   ├── cameraBus.ts         camera-preset pub/sub + isCameraAnimating() flag
 │   ├── format.ts            number/time/colour helpers
 │   ├── modelChoice.ts       `?model=` resolution + hydration-safe readers
+│   ├── providerIdentity.ts  provider key → ResolvedIdentity (colour, shell, topper, emblem)
 │   ├── random.ts            seeded LCG (no Math.random during render)
 │   ├── renderStats.ts       render-frame counter shared with the HUD FPS meter
-│   ├── robotModel.ts        single source of truth for the robot's shape and palette
+│   ├── robotModel.ts        single source of truth for the robot's shape, identity tables and palette
 │   ├── routerAdapter.ts     9Router SQLite reader + status/metric normaliser
 │   ├── statusResolution.ts  provider status rules (traffic vs. account flags)
 │   └── types.ts             AgentStatus, AgentTelemetry, AgentConfig
@@ -147,6 +186,8 @@ Generated assets and tooling:
 public/models/worker-robot.glb       generated model (72 488 bytes, 30 parts, 2.365 m)
 public/models/worker-robot.meta.json build manifest (part count, bounds, tintable meshes)
 scripts/build-robot-model.mjs        `npm run build:model` — writes both files from robotModel.ts
+scripts/identity-rules.mjs           `npm run identity:test` — truth table for providerIdentity.ts
+scripts/identity-render.mjs          live-graph gate: shells, toppers, baked ball, pill clearance
 scripts/status-rules.mjs             `npm run status:test` — truth table for statusResolution.ts
 scripts/explain-status.mjs           `npm run status:live` — shipping rules vs. the live database
 ```
@@ -234,6 +275,15 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   `GLTFLoader.load` inside an effect with one promise per URL: a failure becomes state, logs one
   warning, sets `useUiStore.modelError`, and renders the procedural robot. `RobotEffects` renders
   in both paths, so opting into a model never deletes the bulb, smoke or parcels.
+- **Identity is portal-ed on, not baked.** The file stores the neutral shared body, so the provider
+  shell, topper and emblem are mounted with `createPortal` onto the clone's own `head` / `torso` /
+  `antenna` joints. That is what makes a crest follow the head when it looks around and tilts 45° on
+  `ERROR`, and what lets the antenna wobble carry the topper with it. Two details worth keeping:
+  `RobotIdentityParts` is used rather than `RobotParts`, because the clone already contains the baked
+  shared body and mounting it again would double every block; and the baked `antennaBall` is hidden
+  whenever the identity's topper replaces it. The joints are looked up in a `useMemo` (the portals
+  need them during render) while the frame loop reads them through a ref — `react-hooks/purity`
+  forbids mutating a render-scoped value after render.
 
 ## 6. Live Telemetry Pipeline (9Router)
 - **Why SQLite:** 9Router's `/api/usage/*` routes are JWT/cookie protected (401 without a
@@ -318,7 +368,30 @@ scripts/perf.mjs    rendered-FPS sampler (counts gl.clear); --idle forces the 30
 scripts/shot.mjs    navigates with ?capture=1 and captures a full or clipped screenshot
 scripts/probe.mjs   DOM/GL introspection
 scripts/build-robot-model.mjs  regenerates public/models/worker-robot.glb (+ meta) from robotModel.ts
+scripts/identity-rules.mjs     truth table for providerIdentity.ts (npm run identity:test)
+scripts/identity-render.mjs    live-graph render gate for the per-provider identity (26 assertions)
 ```
+
+`identity-render.mjs` answers a question a screenshot cannot: *is a shell authored in the part
+tables actually mounted on the live three.js graph?* A colour swap looks identical in a PNG. It
+needs `?capture=1`, which is what makes `Scene` publish `window.__office` (scene, camera, and a
+`robots` getter) from the `SceneBridge` component. It asserts, per bot on stage: identity meshes are
+mounted, the baked `antennaBall` visibility matches the topper, exactly one pulsing topper exists,
+the accent colour is the identity colour, and **the name pill's bottom edge clears the topmost
+identity vertex**. That last one is a real regression guard — `<Html center>` used to drop half the
+pill (~27 px ≈ 0.19 m) back over the topper on three of four bots.
+
+Run it on both bodies; the `.glb` path has its own plumbing (portals, hidden baked ball):
+
+```bash
+node scripts/identity-render.mjs                                   # procedural
+TARGET_URL='http://localhost:3001/?capture=1&model=on' node scripts/identity-render.mjs
+```
+
+`VIEW_W` / `VIEW_H` override the viewport; the gate is green at 1280x720, 1440x900, 1600x1000 and
+1920x1080. Pill clearance is tightest at the smallest viewport, so check that one when touching
+`PILL_Y`, `PILL_Z` or any topper envelope.
+
 All scripts drive Chrome over CDP; use `CDP_PORT=9224` for the hardware-GPU profile (port 9223 is
 SwiftShader software rendering and reports misleadingly low FPS).
 

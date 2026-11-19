@@ -269,3 +269,59 @@ loop, so 2 ticks/s added 2 frames/s. Fix: value-compared subscriptions
 **Phase 4.6 verification:** `npx tsc --noEmit` → 0, `npx eslint` → 0, `npm run status:test` →
 51/51, `npm run build` → clean, smoke → four states with `bubbleVisible: true`,
 `canvasNonBlank: true`, zero page/console errors, and `npm run status:live` matching the office.
+
+## Phase 5: Per-Provider Bot Identity
+
+Each live provider's bot now looks like that provider: a distinctive head silhouette, an antenna
+topper, a chest emblem and the brand colour. Unknown providers keep the original body.
+
+- [x] `src/lib/providerIdentity.ts` — provider key → `ResolvedIdentity` (`id`, `color`, optional
+      `accent2`, `shell`, `topper`, `emblem`), 13 identities, `UNKNOWN_PROVIDER_COLORS`, and
+      `resolveIdentity`. The only place provider strings are matched.
+- [x] `src/lib/robotModel.ts` — `SHELLS` / `TOPPERS` / `EMBLEMS` shape tables, `identityPartsFor()`,
+      `identityBounds()`, and the exported `SHELL_ENVELOPE` / `TOPPER_ENVELOPE` / `EMBLEM_ENVELOPE`
+      that union into `ROBOT_ENVELOPE_TOP` / `ROBOT_ENVELOPE_HEIGHT`. `ROBOT_HEIGHT` stays 2.365 m.
+      The module keeps **zero runtime imports** so Node can type-strip it for the build scripts.
+- [x] Identity travels on telemetry (`AgentTelemetry.identity`), not by matching provider strings at
+      render time; `routerAdapter.ts` lost `PROVIDER_META` and its hash palette.
+- [x] `RobotParts.tsx` — `RobotIdentityParts` (identity only) and `AntennaTopper`, whose pulse lives
+      in a wrapper group so every topper keeps the old ball's "alive" feel.
+- [x] `WorkerRobot.tsx` — identity threaded through the rig; the runtime-driven antenna ball mesh is
+      replaced by `<AntennaTopper>`.
+- [x] `ModelRobot.tsx` — identity parts `createPortal`-ed onto the clone's own `head` / `torso` /
+      `antenna` joints so they follow the performance; baked `antennaBall` hidden when replaced.
+- [x] `Scene.tsx` — identity selector + threading, derived `PILL_Y` / `PILL_Z`, and the
+      `?capture=1` `SceneBridge` that publishes `window.__office` for the render gate.
+- [x] `scripts/identity-rules.mjs` (551 assertions) and `scripts/identity-render.mjs` (26 live-graph
+      assertions, run on both bodies).
+
+### Phase 5 notes
+- **Identity is data, not branches.** The rig, the `.glb` path and the tests all read the same three
+  tables. Adding a provider is a table edit; no component knows a provider name.
+- **The `.glb` gets identity portal-ed on.** Its clone already contains the baked shared body, so it
+  mounts `RobotIdentityParts` (identity only) — mounting `RobotParts` again would double every block.
+  Portals onto the joints are what make a crest follow the head when it looks around and tilts 45° on
+  `ERROR`.
+- **The render gate caught a real bug, which is why it exists.** A screenshot cannot tell a mounted
+  shell from a recoloured one, so `identity-render.mjs` walks the live graph. It found the name pill
+  covering the topper on three of four bots. Two causes, both measured: `<Html center>` drops half
+  the pill (~27 px ≈ 0.19 m at the desks) back over the anchor, and the pill sat 0.48 m nearer the
+  camera than the antenna, so the same world height projected *lower* on screen. Fixed by anchoring
+  the wrapper bottom-centre and moving the pill into the antenna's plane; clearance is now 5–9 px at
+  every tested viewport.
+- **Envelope ≠ body height.** `ROBOT_HEIGHT` (2.365 m) is what the `.glb` build asserts; the pill
+  rides `ROBOT_ENVELOPE_TOP` (2.49 m at rest) plus `TOPPER_ANIMATION_LIFT` (0.05 m), measured as the
+  worst animated topper peak over 6 s of live idle (2.537 m). A taller topper lifts the pill itself.
+- **Two suspected defects were measured and dismissed.** The arch topper's legs clear the cranium by
+  28 cm — what looks like intersection is `shellArchPost`, the head crest, which is meant to hug it.
+  The chest emblem is not occluded by desk or keyboard (camera→emblem ray hits no furniture) and
+  protrudes 10 mm past the `belly` panel, so it neither hides nor z-fights.
+- **`react-hooks/purity` shapes the model path.** The portals need the joints during render, but
+  `useFrame` mutates them, so `ModelRobot` keeps the joints in a `useMemo` and animates through a ref
+  that always points at the current set.
+
+**Phase 5 verification:** `npm run identity:test` → 551/551, `node scripts/identity-render.mjs` →
+26/26 on both the procedural and `?model=on` bodies (green at 1280x720, 1440x900, 1600x1000 and
+1920x1080), `npx tsc --noEmit` → 0, `npx eslint` → 0, `npm run smoke` → clean, `npm run layout:test`
+→ 15/15 with `pills=4/4` at every viewport, `npm run build:model` → 30 parts / 2.365 m with
+`git diff public/models/` empty, `npm run build` → clean.
