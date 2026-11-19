@@ -33,6 +33,14 @@ export function getAgentSlot(index: number): AgentSlot {
   };
 }
 
+/**
+ * The four simulation agents.
+ *
+ * Each names an identity rather than a colour: `buildInitialAgents()` resolves
+ * it into the body colour and the shell. Only `import type` appears in this
+ * module — `scripts/layout-check.mjs` imports it directly through Node's type
+ * stripping, so a runtime import here would break the layout gate at load time.
+ */
 export const AGENT_CONFIGS: AgentConfig[] = [
   {
     id: 'gemini-2.5-pro',
@@ -40,7 +48,7 @@ export const AGENT_CONFIGS: AgentConfig[] = [
     shortName: 'GEMINI',
     provider: 'Google DeepMind',
     model: 'gemini-2.5-pro',
-    accentColor: '#5CB8F2',
+    identity: 'gemini',
   },
   {
     id: 'claude-sonnet-4-5',
@@ -48,7 +56,7 @@ export const AGENT_CONFIGS: AgentConfig[] = [
     shortName: 'CLAUDE',
     provider: 'Anthropic',
     model: 'claude-sonnet-4-5',
-    accentColor: '#FF9D5C',
+    identity: 'anthropic',
   },
   {
     id: 'gpt-5-1',
@@ -56,7 +64,7 @@ export const AGENT_CONFIGS: AgentConfig[] = [
     shortName: 'GPT',
     provider: 'OpenAI',
     model: 'gpt-5.1',
-    accentColor: '#58D6A9',
+    identity: 'openai',
   },
   {
     id: 'llama-3-3-70b',
@@ -64,7 +72,7 @@ export const AGENT_CONFIGS: AgentConfig[] = [
     shortName: 'LLAMA',
     provider: 'Ollama · Local',
     model: 'llama3.3:70b',
-    accentColor: '#B98BFF',
+    identity: 'ollama',
   },
 ];
 

@@ -417,6 +417,33 @@ check(
 );
 
 /* -------------------------------------------------------------------------- */
+console.log('\n--- telemetry: the simulation roster carries real identities ---\n');
+
+// `agents.ts` is imported here exactly the way `layout-check.mjs` imports it —
+// straight through Node's type stripping. If a runtime import is ever added to
+// it, this line is what breaks first, before `layout:test` does.
+const { AGENT_CONFIGS } = await import('../src/lib/agents.ts');
+
+for (const config of AGENT_CONFIGS) {
+  check(`${config.id} declares an identity`, typeof config.identity, 'string');
+  check(
+    `${config.id} resolves to a known identity, not the default body`,
+    resolveIdentity(config.identity).id !== 'default',
+    true,
+  );
+  check(`${config.id} no longer carries accentColor`, 'accentColor' in config, false);
+}
+
+// The four simulation agents must not all look the same: they are the first
+// thing anyone sees on load.
+const simulationIdentities = AGENT_CONFIGS.map((config) => resolveIdentity(config.identity).id);
+check(
+  'the four simulation agents are four different providers',
+  new Set(simulationIdentities).size,
+  simulationIdentities.length,
+);
+
+/* -------------------------------------------------------------------------- */
 console.log('\n--- aliases: normalised, unique, and non-empty for real identities ---\n');
 
 const normalise = (key) => key.toLowerCase().replace(/[^a-z0-9]/g, '');

@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { AgentTelemetry } from './types';
+import { resolveIdentity } from './providerIdentity';
 import {
   describeError,
   emptyHealth,
@@ -57,45 +58,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /*  Provider presentation                                                     */
 /* -------------------------------------------------------------------------- */
 
-interface ProviderMeta {
-  name: string;
-  color: string;
-}
-
-/**
- * Stable display names and accent colours keyed by 9Router provider id.
- * Colours reuse the office palette so live providers stay visually consistent
- * with the manual simulation agents.
- */
-const PROVIDER_META: Record<string, ProviderMeta> = {
-  antigravity: { name: 'Antigravity', color: '#5CB8F2' },
-  'codebuddy-intl': { name: 'CodeBuddy', color: '#FF9D5C' },
-  codex: { name: 'OpenAI Codex', color: '#58D6A9' },
-  gemini: { name: 'Gemini', color: '#B98BFF' },
-  kilocode: { name: 'Kilo Code', color: '#FFC94D' },
-  nous: { name: 'Nous Research', color: '#FF8FA3' },
-  nvidia: { name: 'NVIDIA NIM', color: '#76B900' },
-  opencode: { name: 'OpenCode', color: '#7C9CFF' },
-  openrouter: { name: 'OpenRouter', color: '#9B8CFF' },
-};
-
-/** Palette for providers with no entry in `PROVIDER_META`, picked by hash. */
-const UNKNOWN_PROVIDER_COLORS = ['#5CB8F2', '#FF9D5C', '#58D6A9', '#B98BFF', '#FFC94D', '#FF8FA3'];
-
-function metaFor(provider: string): ProviderMeta {
-  const known = PROVIDER_META[provider];
-  if (known) return known;
-
-  // Unknown provider: derive a stable colour from the id so it never flickers.
-  let hash = 0;
-  for (let i = 0; i < provider.length; i += 1) {
-    hash = (hash * 31 + provider.charCodeAt(i)) % 100_000;
-  }
-  return {
-    name: provider,
-    color: UNKNOWN_PROVIDER_COLORS[hash % UNKNOWN_PROVIDER_COLORS.length],
-  };
-}
+// Names, colours and bot identities all come from `providerIdentity.ts`. This
+// adapter used to keep its own `PROVIDER_META` table and hash palette, which
+// meant a provider's mug, monitor LED and selection ring could disagree with the
+// colour of its own body. One resolver now answers all of it.
 
 /* -------------------------------------------------------------------------- */
 /*  Public shape                                                              */
@@ -403,13 +369,14 @@ export async function readTelemetrySnapshot(): Promise<TelemetrySnapshot> {
         ? toNumber(today.promptTokens) + toNumber(today.completionTokens)
         : 0;
 
-      const meta = metaFor(row.provider);
+      const identity = resolveIdentity(row.provider);
 
       return {
         id: row.provider,
-        name: meta.name,
+        name: identity.label,
         provider: row.provider,
-        accentColor: meta.color,
+        accentColor: identity.color,
+        identity: identity.id,
         status,
         tokensPerSecond,
         totalTokensToday,

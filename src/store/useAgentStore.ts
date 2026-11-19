@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { AGENT_CONFIGS, STATUS_META } from '@/lib/agents';
+import { resolveIdentity } from '@/lib/providerIdentity';
 import { useUiStore } from '@/store/useUiStore';
 import type { AgentStatus, AgentTelemetry } from '@/lib/types';
 
@@ -88,11 +89,15 @@ function buildInitialAgents(): AgentTelemetry[] {
   return AGENT_CONFIGS.map((config) => {
     const status = STATUS_SEED[config.id] ?? 'IDLE';
     const metrics = SEED_METRICS[status];
+    // The config names an identity; the colour and shape come from one place, so
+    // the body, the mug and the selection ring can never disagree.
+    const identity = resolveIdentity(config.identity);
     return {
       id: config.id,
       name: config.name,
       provider: config.provider,
-      accentColor: config.accentColor,
+      accentColor: identity.color,
+      identity: identity.id,
       status,
       tokensPerSecond: metrics.tokensPerSecond,
       totalTokensToday: metrics.totalTokensToday,
