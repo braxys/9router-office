@@ -179,7 +179,7 @@ loop, so 2 ticks/s added 2 frames/s. Fix: value-compared subscriptions
 - The `.glb` path is opt-in (`?model=` or the HUD toggle) and the procedural robot remains the
   default. Shape lives in the file, animation lives in code: `src/lib/robotModel.ts` is the
   single source of truth, `scripts/build-robot-model.mjs` (`npm run build:model`) writes
-  `public/models/worker-robot.glb` (72 488 bytes, 30 parts, 2.365 m tall), and
+  `public/models/worker-robot.glb` (72 616 bytes, 30 parts, 2.365 m tall), and
   `ModelRobot.tsx` drives the cloned `torso`/`head`/`antenna`/`armL`/`armR` nodes with the
   same springs as `WorkerRobot.tsx`. `RobotEffects.tsx` keeps the per-status props for both.
 - `useGLTF` was rejected for this path: it suspends by throwing and then rethrows the
@@ -337,11 +337,13 @@ palette?)` resolves a part's colour at render time.
 
 - [x] `src/lib/providerIdentity.ts` — all 12 known providers carry a four-role palette sampled from
       that provider's own logo. `default` keeps an **empty** palette `{}`, so an unknown provider
-      keeps exactly the old look through the runtime hash colour.
+      keeps its old body, limbs, shins, badge and hash-derived colour. One part did move: the bow tie
+      is the `accent` role, so it now takes the runtime hash accent instead of the old baked pink
+      (`#ff6b7a` / `#e05a6a`). The tie is the only part of the default bot that changed.
 - [x] `src/lib/robotModel.ts` — `RobotPalette` and `RECOLOR_ROLES`; `accent2` is gone. Fallback
       order: `limb` derives from the darkened `body` (not from `accent`), `accent` falls back to
-      `body`, `extra` falls back through `limb` to the darkened `body`. `pink` / `pinkDeep` remain
-      only for the face's error bar.
+      `body`, `extra` falls back through `limb` to the darkened `body`. `pink` serves the face's
+      error bar; `pinkDeep` is retained but currently unused.
 - [x] `.glb` body bakes all four roles: 12 meshes carry `userData.recolor` — `cranium` / `chest` =
       `body`, `bowTieL` / `bowTieR` / `bowTieKnot` / `nameBadgeStripe` = `accent`, `upperArmL` /
       `upperArmR` / `thighL` / `thighR` = `limb`, `shinL` / `shinR` = `extra`.

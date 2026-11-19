@@ -27,14 +27,16 @@ that the robots send parcels to.
 - **Head:** a retro-monitor cube with a lighter face plate, a pair of **big expressive square eyes**
   (with a white glint), a simple LED mouth bar, pink cheek blush, ear bolts, and a springy
   antenna topped with a ball that wobbles with the head's motion.
-- **Body:** a boxy chest with a lighter belly plate, a red **bow tie**, and a small **name badge**.
+- **Body:** a boxy chest with a lighter belly plate, a **bow tie** in the accent colour, and a small
+  **name badge**.
 - **Arms:** boxy upper arms with cream block hands that bounce and jitter as they type.
 - **Legs:** seated thighs tucked under the desk, shins dropping to the floor, and cream block feet
   resting flat — so the robot reads as *sitting on the chair*, never floating.
 - **Per-provider body colour:** each bot wears a four-role brand palette — `body` (cranium and
-  chest), `limb` (upper arms and thighs), `accent` (bow tie, badge stripe, crest, topper, emblem)
-  and `extra` (shins) — so a bot reads multi-colour rather than one flat hue. The colours are taken
-  from each provider's own logo; the full per-provider table lives in `src/lib/providerIdentity.ts`.
+  chest), `limb` (upper arms and thighs), `accent` (bow tie, badge stripe, and most of the crest,
+  topper and emblem) and `extra` (shins) — so a bot reads multi-colour rather than one flat hue. The
+  rest of the identity parts take `body`, `limb` or `extra`. The colours are taken from each
+  provider's own logo; the full per-provider table lives in `src/lib/providerIdentity.ts`.
   Unknown providers keep the hash-derived runtime colour.
 
 ## 4. Environment: The Blocky Office Diorama
