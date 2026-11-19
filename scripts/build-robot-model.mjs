@@ -71,6 +71,7 @@ const {
   HANDS,
   ANTENNA_BALL,
   ROBOT_BODY_DEFAULT,
+  RECOLOR_ROLES,
   ROBOT_HEIGHT,
   resolveRobotColor,
 } = spec;
@@ -109,8 +110,9 @@ function geometryFor(part) {
 
 /**
  * `userData.recolor` tells `ModelRobot.tsx` which palette role a mesh plays, so
- * a loaded model can be tinted per agent (`body` = accent, `limb` = darker
- * shade). glTF stores it in `extras`, which the loader restores.
+ * a loaded model can be tinted per agent. There are four roles — `body`,
+ * `limb`, `accent`, `extra` — and the role is the part's own palette key, not a
+ * stand-in for another. glTF stores it in `extras`, which the loader restores.
  */
 function makeMesh({ name, part, color, recolor, position, rotation }) {
   const mesh = new THREE.Mesh(geometryFor(part), materialFor(part, color));
@@ -149,12 +151,9 @@ let partCount = 0;
 for (const part of ROBOT_PARTS) {
   const group = nodeGroups.get(part.node);
   if (!group) throw new Error(`robot spec: part "${part.id}" targets unknown node "${part.node}"`);
-  const recolor =
-    part.color === 'body' || part.color === 'limb' || part.color === 'accent'
-      ? part.color === 'accent'
-        ? 'body'
-        : part.color
-      : undefined;
+  // The role is the part's own palette key now: `accent` is a real role with its
+  // own brand colour, not a stand-in for `body`.
+  const recolor = RECOLOR_ROLES.includes(part.color) ? part.color : undefined;
   group.add(
     makeMesh({
       name: part.id,
@@ -325,12 +324,25 @@ if (Math.abs(loadedSize.y - ROBOT_HEIGHT) > 0.001) {
   );
 }
 
-// Per-agent tinting depends on `extras` surviving the round trip.
-const tintable = [];
+// Per-agent tinting depends on `extras` surviving the round trip — and on the
+// role being the *right* one: a part recoloured as `limb` when its spec says
+// `extra` would render a shin in the thigh colour, and only a per-part check
+// catches that.
+const loadedRoles = new Map();
 loaded.scene.traverse((object) => {
   const role = object.userData?.recolor;
-  if (role === 'body' || role === 'limb') tintable.push(object);
+  if (typeof role === 'string') loadedRoles.set(object.name, role);
 });
+
+const roleFailures = ROBOT_PARTS.filter((part) => RECOLOR_ROLES.includes(part.color)).flatMap((part) => {
+  const got = loadedRoles.get(part.id);
+  return got === part.color
+    ? []
+    : [`part "${part.id}" should carry recolor "${part.color}", got ${JSON.stringify(got ?? null)}`];
+});
+failures.push(...roleFailures);
+
+const tintable = [...loadedRoles.keys()];
 if (tintable.length === 0) {
   failures.push('no meshes carry userData.recolor after reload — per-agent tinting would break');
 }
