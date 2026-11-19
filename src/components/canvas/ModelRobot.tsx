@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import type { AgentStatus } from '@/lib/types';
 import type { ResolvedIdentity } from '@/lib/providerIdentity';
-import { ROBOT_HEIGHT, darkenHex } from '@/lib/robotModel';
+import { ROBOT_HEIGHT, RECOLOR_ROLES, resolveRobotColor, type RecolorRole } from '@/lib/robotModel';
 import { useUiStore } from '@/store/useUiStore';
 import { AntennaTopper, RobotIdentityParts } from './RobotParts';
 import { RobotEffects } from './RobotEffects';
@@ -16,6 +16,16 @@ import { DESK_SEAT } from './WorkDesk';
 /** Same springy ease as the procedural rig, so both bodies move alike. */
 function spring(current: number, target: number, dt: number, stiffness = 9) {
   return current + (target - current) * Math.min(1, dt * stiffness);
+}
+
+/**
+ * A baked `userData.recolor` value, checked against the shared role list.
+ *
+ * The list itself is NOT redeclared here: `robotModel.ts` owns it, and two lists
+ * that can drift are a bug you only notice when a part silently stops tinting.
+ */
+function isRecolorRole(value: unknown): value is RecolorRole {
+  return typeof value === 'string' && (RECOLOR_ROLES as readonly string[]).includes(value);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -69,7 +79,7 @@ function loadModelScene(url: string): Promise<THREE.Group> {
 export interface ModelRobotProps {
   /** Path to the `.glb` (under `/public` or an absolute http(s) URL). */
   url: string;
-  /** The agent's accent colour; tints the `body` and `limb` parts. */
+  /** The agent's accent colour; `resolveRobotColor` turns it into the four roles. */
   accentColor: string;
   /** Which provider bot this is: its shell, topper and emblem. */
   identity: ResolvedIdentity;
@@ -95,7 +105,9 @@ export interface ModelRobotProps {
  *     is normalised to `ROBOT_HEIGHT` so it lands on the chair at any scale.
  *  2. **Per-agent colour.** `SkeletonUtils.clone` shares *materials* between
  *     clones, so they are cloned per instance before tinting — otherwise all
- *     four desks would end up the same colour.
+ *     four desks would end up the same colour. The colour itself comes from
+ *     `resolveRobotColor`, the same resolver the procedural rig calls, so the
+ *     two bodies can never disagree about what a role means.
  */
 export function ModelRobot({ url, fallback, ...rest }: ModelRobotProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
@@ -171,9 +183,6 @@ function LoadedModelRobot({
     // by exactly the seat height. Either way the feet land on the floor.
     copy.position.set(0, -DESK_SEAT.y - bounds.min.y * scale, 0);
 
-    const body = accentColor;
-    const limb = darkenHex(accentColor, 0.82);
-
     copy.traverse((object: THREE.Object3D) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -186,8 +195,9 @@ function LoadedModelRobot({
       const apply = (material: THREE.Material) => {
         const colored = material as THREE.MeshStandardMaterial | THREE.MeshBasicMaterial;
         if (!colored.color) return;
-        if (role === 'body') colored.color.set(body);
-        else if (role === 'limb') colored.color.set(limb);
+        if (isRecolorRole(role)) {
+          colored.color.set(resolveRobotColor(role, accentColor, identity.palette));
+        }
 
         // Match the procedural robot's flat look: no PBR highlights.
         if ((material as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
@@ -211,7 +221,7 @@ function LoadedModelRobot({
     if (bakedBall) bakedBall.visible = false;
 
     return copy;
-  }, [scene, accentColor]);
+  }, [scene, accentColor, identity]);
 
   // The joints are looked up once per clone. The `.glb` stores them under the
   // same names the spec uses (`ROBOT_NODES`), which is what lets the animation
@@ -320,14 +330,14 @@ function LoadedModelRobot({
           double every block. */}
       {joints.head &&
         createPortal(
-          <RobotIdentityParts node="head" identity={identity} accent={identity.color} />,
+          <RobotIdentityParts node="head" identity={identity} accent={accentColor} />,
           joints.head,
         )}
       {joints.antenna &&
         createPortal(<AntennaTopper identity={identity} status={status} />, joints.antenna)}
       {joints.torso &&
         createPortal(
-          <RobotIdentityParts node="torso" identity={identity} accent={identity.color} />,
+          <RobotIdentityParts node="torso" identity={identity} accent={accentColor} />,
           joints.torso,
         )}
       {/* The comedy belongs to the performance, not the body: the same props

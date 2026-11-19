@@ -25,7 +25,10 @@ export interface RobotPartsProps {
    * lets `<AntennaTopper>` own whatever sits on top.
    */
   identity: ResolvedIdentity | null;
-  /** The agent's accent colour; resolves the `body` / `limb` / `accent` palette keys. */
+  /**
+   * The agent's accent colour; resolves the four per-agent roles, and the
+   * identity's palette overrides per role.
+   */
   accent: string;
 }
 
@@ -99,11 +102,8 @@ function RobotPartMesh({
   accent: string;
   identity: ResolvedIdentity | null;
 }) {
-  // `accent2` is the identity's second brand colour. Parts that ask for it get
-  // it here, which is what keeps the brand palette in one table instead of
-  // sprinkling hex literals through the shape spec.
-  const partAccent = part.color === 'accent2' ? (identity?.accent2 ?? accent) : accent;
-  const color = resolveRobotColor(part.color, partAccent);
+  // The identity's palette overrides per role; a provider with no palette falls back to `accent`.
+  const color = resolveRobotColor(part.color, accent, identity?.palette);
   // Cylinders and spheres are specified by size in the spec so bounds maths stays
   // uniform; here they get their real primitive arguments.
   const rotation = part.rotation
@@ -179,33 +179,4 @@ export function AntennaTopper({
       )}
     </group>
   );
-}
-
-/** Re-exported so the rig keeps a single import site for palette lookups. */
-export function useRobotPalette(accent: string) {
-  return useMemo(
-    () => ({
-      body: resolveRobotColor('body', accent),
-      limb: resolveRobotColor('limb', accent),
-      cream: ROBOT_COLORS.cream,
-      ink: ROBOT_COLORS.ink,
-      blush: ROBOT_COLORS.blush,
-      pink: ROBOT_COLORS.pink,
-      pinkDeep: ROBOT_COLORS.pinkDeep,
-      metal: ROBOT_COLORS.metal,
-      white: ROBOT_COLORS.white,
-      yellow: ROBOT_COLORS.yellow,
-    }),
-    [accent],
-  );
-}
-
-/** Convenience for callers that only need the darkened limb shade. */
-export function limbColorFor(accent: string): string {
-  return resolveRobotColor('limb', accent);
-}
-
-/** Three.js colour helper kept out of render for the `react-hooks/purity` rule. */
-export function hexToColor(hex: string): THREE.Color {
-  return new THREE.Color(hex);
 }

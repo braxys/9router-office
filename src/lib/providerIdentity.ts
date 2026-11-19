@@ -14,7 +14,7 @@
  * `robotModel.ts`. The shape unions live in `robotModel.ts` because that module
  * owns the part tables; they arrive here as types and are erased at runtime.
  */
-import type { EmblemId, ShellId, TopperId } from './robotModel';
+import type { EmblemId, RobotPalette, ShellId, TopperId } from './robotModel';
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -46,10 +46,15 @@ export interface ProviderIdentity {
   id: IdentityId;
   /** Display name. `null` only on `default` -> the raw provider key is used. */
   label: string | null;
-  /** Main body colour. `null` only on `default` -> hashed from the key. */
-  body: string | null;
-  /** Second brand colour, used by one shell part (CodeBuddy ears, Antigravity arch). */
-  accent2?: string;
+  /**
+   * The four brand roles from the provider's real logo.
+   *
+   * `{}` only on `default`: the runtime accent hashed from the key wins, which
+   * keeps an unknown provider's body, limbs, shins and badge as they are today.
+   * One part moved: the bow tie is the `accent` role, so it takes the hash
+   * colour instead of the old baked pink.
+   */
+  palette: RobotPalette;
   shell: ShellId;
   topper: TopperId;
   emblem: EmblemId;
@@ -62,7 +67,7 @@ export interface ResolvedIdentity {
   id: IdentityId;
   label: string;
   color: string;
-  accent2?: string;
+  palette: RobotPalette;
   shell: ShellId;
   topper: TopperId;
   emblem: EmblemId;
@@ -73,15 +78,23 @@ export interface ResolvedIdentity {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Colours are the providers' real brand hexes, taken from 9Router's provider
- * registry — not the pastel office palette. They sit on a cream floor under a
- * warm key light, so a few are a touch deeper than the logo's own value.
+ * One palette per provider, four roles each, taken from the provider's real
+ * logo — not the pastel office palette. They sit on a cream floor under a warm
+ * key light, so a few are a touch deeper than the logo's own value.
+ *
+ * Every role is declared explicitly on every row, even where two roles happen to
+ * hold the same hex: "this brand has no second colour" is then a statement in
+ * the data, not a side effect of the fallback chain.
+ *
+ * `default` is the empty palette on purpose — an unknown provider keeps the
+ * colour hashed from its key, which keeps its body, limbs, shins and badge as
+ * they are today; only the bow tie now takes the `accent` role.
  */
 export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   default: {
     id: 'default',
     label: null,
-    body: null,
+    palette: {},
     shell: 'box',
     topper: 'ball',
     emblem: 'none',
@@ -90,8 +103,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   codebuddy: {
     id: 'codebuddy',
     label: 'CodeBuddy',
-    body: '#5B4BE8',
-    accent2: '#2FD4C4',
+    palette: { body: '#6C4DFF', limb: '#2EA99D', accent: '#2EA99D', extra: '#2EA99D' },
     shell: 'cat',
     topper: 'catface',
     emblem: 'catface',
@@ -100,8 +112,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   antigravity: {
     id: 'antigravity',
     label: 'Antigravity',
-    body: '#4F9CF0',
-    accent2: '#F5B73D',
+    palette: { body: '#3186FF', limb: '#FC413D', accent: '#FFE432', extra: '#00B95C' },
     shell: 'arch',
     topper: 'arch',
     emblem: 'arch',
@@ -110,7 +121,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   codex: {
     id: 'codex',
     label: 'OpenAI Codex',
-    body: '#3B82F6',
+    palette: { body: '#F2F2F2', limb: '#1A1A1A', accent: '#10A37F', extra: '#1A1A1A' },
     shell: 'hex',
     topper: 'knot',
     emblem: 'knot',
@@ -119,7 +130,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   gemini: {
     id: 'gemini',
     label: 'Gemini',
-    body: '#4285F4',
+    palette: { body: '#4285F4', limb: '#9B72CB', accent: '#D96570', extra: '#F9AB00' },
     shell: 'box',
     topper: 'sparkle',
     emblem: 'sparkle',
@@ -128,7 +139,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   kilocode: {
     id: 'kilocode',
     label: 'Kilo Code',
-    body: '#FF6B35',
+    palette: { body: '#F4ED14', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
     shell: 'pixel',
     topper: 'pixelK',
     emblem: 'pixelK',
@@ -137,7 +148,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   nvidia: {
     id: 'nvidia',
     label: 'NVIDIA NIM',
-    body: '#76B900',
+    palette: { body: '#76B900', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
     shell: 'box',
     topper: 'eye',
     emblem: 'eye',
@@ -146,10 +157,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   nous: {
     id: 'nous',
     label: 'Nous Research',
-    body: '#7C3AED',
-    // Ink, not black: a pure #000 fringe reads as a hole punched in the head
-    // next to this office's cream and pastel palette.
-    accent2: '#2A2A33',
+    palette: { body: '#111111', limb: '#F2F2F2', accent: '#0000F2', extra: '#F2F2F2' },
     shell: 'manga',
     topper: 'nfringe',
     emblem: 'nfringe',
@@ -158,7 +166,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   opencode: {
     id: 'opencode',
     label: 'OpenCode',
-    body: '#E87040',
+    palette: { body: '#D2D2D2', limb: '#1F1F1F', accent: '#3B5CF6', extra: '#1F1F1F' },
     shell: 'round',
     topper: 'terminal',
     emblem: 'terminal',
@@ -167,7 +175,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   openrouter: {
     id: 'openrouter',
     label: 'OpenRouter',
-    body: '#F97316',
+    palette: { body: '#7624F4', limb: '#03080A', accent: '#C8FF00', extra: '#03080A' },
     shell: 'box',
     topper: 'router',
     emblem: 'router',
@@ -176,7 +184,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   anthropic: {
     id: 'anthropic',
     label: 'Anthropic',
-    body: '#D97757',
+    palette: { body: '#D97757', limb: '#191919', accent: '#191919', extra: '#191919' },
     shell: 'box',
     topper: 'burst',
     emblem: 'burst',
@@ -185,7 +193,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   openai: {
     id: 'openai',
     label: 'OpenAI',
-    body: '#10A37F',
+    palette: { body: '#10A37F', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
     shell: 'hex',
     topper: 'openai',
     emblem: 'openai',
@@ -194,7 +202,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   ollama: {
     id: 'ollama',
     label: 'Ollama',
-    body: '#9AA7B4',
+    palette: { body: '#9AA7B4', limb: '#111111', accent: '#111111', extra: '#111111' },
     shell: 'box',
     topper: 'llama',
     emblem: 'llama',
@@ -249,14 +257,15 @@ const ALIAS_INDEX: ReadonlyMap<string, ProviderIdentity> = new Map(
  */
 export function resolveIdentity(key: string): ResolvedIdentity {
   const identity = ALIAS_INDEX.get(normalise(key)) ?? IDENTITIES.default;
+  const { palette } = identity;
   const color =
-    identity.body ?? UNKNOWN_PROVIDER_COLORS[hashKey(key) % UNKNOWN_PROVIDER_COLORS.length];
+    palette.body ?? UNKNOWN_PROVIDER_COLORS[hashKey(key) % UNKNOWN_PROVIDER_COLORS.length];
 
   return {
     id: identity.id,
     label: identity.label ?? key,
     color,
-    ...(identity.accent2 === undefined ? {} : { accent2: identity.accent2 }),
+    palette,
     shell: identity.shell,
     topper: identity.topper,
     emblem: identity.emblem,

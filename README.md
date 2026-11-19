@@ -31,6 +31,8 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 npm run typecheck     # tsc --noEmit
 npm run lint          # eslint
 npm run identity:test # provider identity truth table (no browser)
+npm run identity:render # per-part colour gate, procedural rig (needs dev server + Chrome on CDP 9223)
+npm run identity:render:model # per-part colour gate, .glb rig (same prerequisites)
 npm run status:test   # provider status truth table (no browser)
 npm run layout:unit   # HUD geometry truth table, incl. the collapsed rail (no browser)
 npm run build:model   # regenerate public/models/worker-robot.glb from robotModel.ts
@@ -39,11 +41,11 @@ npm run layout:test   # 15-viewport HUD layout gate (needs dev server + Chrome o
 ```
 
 `scripts/identity-render.mjs` is the render gate for the per-provider bots; it needs the dev server
-and `?capture=1`, and is worth running on both bodies:
+on port 3001 and Chrome headless on CDP 9223, and is worth running on both bodies:
 
 ```bash
-node scripts/identity-render.mjs
-TARGET_URL='http://localhost:3001/?capture=1&model=on' node scripts/identity-render.mjs
+npm run identity:render        # procedural rig (?capture=1)
+npm run identity:render:model  # .glb rig      (?capture=1&model=on)
 ```
 
 See `ARCHITECTURE.md` for the data flow, the identity tables and what each gate actually proves.

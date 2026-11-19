@@ -15,6 +15,7 @@ import {
   EMBLEM_ENVELOPE,
   EMBLEMS,
   FACE,
+  LIMB_DARKEN,
   ROBOT_COLORS,
   ROBOT_ENVELOPE_HEIGHT,
   ROBOT_ENVELOPE_TOP,
@@ -24,12 +25,14 @@ import {
   SHELL_ENVELOPE,
   TOPPERS,
   TOPPER_ENVELOPE,
+  darkenHex,
   identityBounds,
   identityPartsFor,
   resolveRobotColor,
   robotBounds,
   robotNodePosition,
 } from '../src/lib/robotModel.ts';
+import * as robotModel from '../src/lib/robotModel.ts';
 import { IDENTITIES, UNKNOWN_PROVIDER_COLORS, resolveIdentity } from '../src/lib/providerIdentity.ts';
 import { readFileSync } from 'node:fs';
 
@@ -358,39 +361,193 @@ for (const identity of Object.values(IDENTITIES)) {
 /* -------------------------------------------------------------------------- */
 console.log('\n--- assertion 6: no two identities are twins ---\n');
 
-const triples = Object.values(IDENTITIES).map(
-  (identity) => `${identity.shell}|${identity.topper}|${identity.body}`,
+// Canonical role order, not `JSON.stringify(palette)`: two identical palettes
+// written with different key orders would stringify differently and the check
+// would pass while the bots are twins.
+const paletteKey = (palette) =>
+  ['body', 'limb', 'accent', 'extra'].map((role) => palette?.[role] ?? '-').join('|');
+
+const triples = Object.entries(IDENTITIES).map(
+  ([, identity]) => `${identity.shell}|${identity.topper}|${paletteKey(identity.palette)}`,
 );
-check('no two identities share shell+topper+colour', new Set(triples).size, triples.length);
+check('no two identities share shell+topper+palette', new Set(triples).size, triples.length);
+
+const unknownA = resolveIdentity('zzz-unknown');
+const unknownB = resolveIdentity('qqq-unknown');
+check('an unknown provider declares an empty palette', [unknownA.palette, unknownB.palette], [{}, {}]);
+check('an unknown provider keeps its hashed body colour',
+  resolveRobotColor('body', unknownA.color, unknownA.palette), unknownA.color);
+check('an unknown provider keeps its darkened limb',
+  resolveRobotColor('limb', unknownA.color, unknownA.palette), darkenHex(unknownA.color, LIMB_DARKEN));
 
 /* -------------------------------------------------------------------------- */
-console.log('\n--- assertion 6b: a part never asks for a colour its identity lacks ---\n');
+console.log('\n--- part roles: the four brand roles across every table ---\n');
 
-// `accent2` is the second brand colour, and only some identities declare one.
-// A shape table that asks for `accent2` on an identity without it silently falls
-// back to the body colour (`RobotParts.tsx` resolves `identity.accent2 ?? accent`),
-// which is how a pupil ends up the same green as its lids and a muzzle merges
-// into the head: the part is there, it just stops being visible. The spec marks
-// `accent2` as `-` for kilocode/nvidia/ollama, so those parts must use a colour
-// that actually exists rather than borrowing a second brand colour they never had.
-for (const id of Object.keys(IDENTITIES)) {
-  const declared = IDENTITIES[id].accent2;
-  const asking = identityPartsFor(resolveIdentity(id))
-    .filter((part) => part.color === 'accent2')
-    .map((part) => part.id);
-  if (declared === undefined) {
-    check(`${id} declares no accent2, so no part may ask for one`, asking, []);
-  } else {
-    check(`${id} declares accent2 and its parts may use it`, asking.length > 0, true);
-  }
+const baseRole = new Map(ROBOT_PARTS.map((part) => [part.id, part.color]));
+check('bow tie is the accent role',
+  [baseRole.get('bowTieL'), baseRole.get('bowTieR'), baseRole.get('bowTieKnot')],
+  ['accent', 'accent', 'accent']);
+check('shins are the fourth colour', [baseRole.get('shinL'), baseRole.get('shinR')], ['extra', 'extra']);
+check('thighs stay the second colour', [baseRole.get('thighL'), baseRole.get('thighR')], ['limb', 'limb']);
+check('no body part is pink any more',
+  ROBOT_PARTS.filter((part) => part.color === 'pink' || part.color === 'pinkDeep').map((part) => part.id), []);
+check('FACE.errorBar keeps its pink', FACE.errorBar.color, 'pink');
+
+// The office palette, written out for the same reason `PALETTE_GRID` is: every
+// other check on a `ROBOT_COLORS` entry compares a role key, and the render gate
+// resolves through the same table, so a typo in a hex would pass every gate.
+// `FACE.errorBar` in particular is a single part whose colour is otherwise only
+// ever asserted by name. A deliberate copy: a spec edit must be made twice, on
+// purpose.
+const ROBOT_COLORS_GRID = {
+  cream: '#fdfbf6',
+  ink: '#3a4a58',
+  blush: '#ffb4c0',
+  pink: '#ff6b7a',
+  pinkDeep: '#e05a6a',
+  metal: '#c9d6e0',
+  white: '#ffffff',
+  yellow: '#ffc94d',
+};
+
+// Iterate `ROBOT_COLORS`, not the grid: the grid is a literal copy that a future
+// colour key will not automatically extend, and looping over it would silently
+// stop covering every key added after today. A missing row must surface as a
+// FAIL (`expected: undefined`), not a TypeError.
+for (const key of Object.keys(ROBOT_COLORS)) {
+  check(`ROBOT_COLORS.${key} is the office hex`, ROBOT_COLORS[key], ROBOT_COLORS_GRID[key]);
+}
+
+// The generator bakes `userData.recolor` from this list and `ModelRobot` tints
+// from it. A role in the list that no base part uses is dead weight; a role used
+// by a base part but missing from the list is a mesh that never gets tinted.
+//
+// Reached through a namespace import, not a named import: a named import of a
+// missing export fails at module-link time, so the whole script dies before
+// printing one assertion and the red run in Step 2 would tell you nothing.
+const BRAND_ROLES = ['body', 'limb', 'accent', 'extra'];
+check('robotModel exports the four brand roles, in brand order',
+  [...(robotModel.RECOLOR_ROLES ?? [])], BRAND_ROLES);
+for (const role of BRAND_ROLES) {
+  check(`some base part wears the ${role} role`,
+    ROBOT_PARTS.some((part) => part.color === role), true);
 }
 
 /* -------------------------------------------------------------------------- */
-console.log('\n--- assertion 7: one source of colour ---\n');
+console.log('\n--- identity parts: never all body, and the body-coloured exceptions ---\n');
+
+const IDENTITY_PARTS = [
+  ...Object.values(SHELLS).flat(),
+  ...Object.values(TOPPERS).flat(),
+  ...Object.values(EMBLEMS).flat(),
+];
+const BODY_ON_PURPOSE = [
+  'shellArchPostL', 'shellArchPostR',
+  'topArchLegL', 'topArchLegR',
+  'emArchLegL', 'emArchLegR',
+  'topCatFace', 'emCatFace',
+];
+check('no identity part is pink any more',
+  IDENTITY_PARTS.filter((part) => part.color === 'pink' || part.color === 'pinkDeep').map((part) => part.id), []);
+
+for (const [table, groups] of [['SHELLS', SHELLS], ['TOPPERS', TOPPERS], ['EMBLEMS', EMBLEMS]]) {
+  for (const [id, parts] of Object.entries(groups)) {
+    if (parts.length === 0) continue;
+    check(`${table}.${id} is not entirely body-coloured`,
+      parts.every((part) => part.color === 'body'), false);
+  }
+}
+
+const identityPartById = new Map(IDENTITY_PARTS.map((part) => [part.id, part]));
+check('the parts that grow out of the body stay body-coloured',
+  BODY_ON_PURPOSE.map((id) => `${id}:${identityPartById.get(id)?.color}`),
+  BODY_ON_PURPOSE.map((id) => `${id}:body`));
+
+/* -------------------------------------------------------------------------- */
+console.log('\n--- Gemini sparkle: one role per diamond ---\n');
+
+for (const [table, groups] of [['TOPPERS', TOPPERS], ['EMBLEMS', EMBLEMS]]) {
+  check(`${table}.sparkle gives each diamond its own role`,
+    Object.fromEntries(groups.sparkle.map((part) => [part.id.replace(/^(top|em)/, ''), part.color])),
+    { SparkleD1: 'body', SparkleD2: 'limb', SparkleH: 'accent', SparkleV: 'extra' });
+}
+
+/* -------------------------------------------------------------------------- */
+console.log('\n--- part role census ---\n');
+
+const census = {};
+for (const part of [...ROBOT_PARTS, ...IDENTITY_PARTS]) census[part.color] = (census[part.color] ?? 0) + 1;
+check('part role census',
+  Object.entries(census).sort(([a], [b]) => a.localeCompare(b)),
+  [['accent', 105], ['body', 12], ['cream', 9], ['extra', 4], ['limb', 6], ['metal', 3]]);
+
+/* -------------------------------------------------------------------------- */
+console.log('\n--- per-provider palettes ---\n');
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+for (const [id, identity] of Object.entries(IDENTITIES)) {
+  if (id === 'default') continue;
+  // `?? {}` / `?.` keep this a *failing assertion* rather than a TypeError when
+  // the palette does not exist yet — a crash would hide every check after it.
+  check(`${id} declares all four roles`,
+    Object.keys(identity.palette ?? {}).sort(), ['accent', 'body', 'extra', 'limb']);
+  for (const role of ['body', 'limb', 'accent', 'extra']) {
+    check(`${id}.${role} is #rrggbb`, HEX.test(identity.palette?.[role] ?? ''), true);
+  }
+}
+check('default declares an empty palette (no override)', IDENTITIES.default.palette, {});
 
 for (const id of Object.keys(IDENTITIES)) {
   if (id === 'default') continue;
-  check(`colour ${id} === body`, resolveIdentity(id).color, IDENTITIES[id].body);
+  check(`${id}: color === palette.body`, resolveIdentity(id).color, IDENTITIES[id].palette?.body);
+}
+
+// The brand table itself, written out. `color === palette.body` above reads both
+// sides from the same field, so it proves the wiring and pins no hex; a typo in a
+// brand colour would otherwise pass every gate. This is the only place the exact
+// values live outside the module, and it is deliberately a copy: a spec edit must
+// be made twice, on purpose.
+const PALETTE_GRID = {
+  codebuddy: { body: '#6C4DFF', limb: '#2EA99D', accent: '#2EA99D', extra: '#2EA99D' },
+  antigravity: { body: '#3186FF', limb: '#FC413D', accent: '#FFE432', extra: '#00B95C' },
+  codex: { body: '#F2F2F2', limb: '#1A1A1A', accent: '#10A37F', extra: '#1A1A1A' },
+  gemini: { body: '#4285F4', limb: '#9B72CB', accent: '#D96570', extra: '#F9AB00' },
+  kilocode: { body: '#F4ED14', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  nvidia: { body: '#76B900', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  nous: { body: '#111111', limb: '#F2F2F2', accent: '#0000F2', extra: '#F2F2F2' },
+  opencode: { body: '#D2D2D2', limb: '#1F1F1F', accent: '#3B5CF6', extra: '#1F1F1F' },
+  openrouter: { body: '#7624F4', limb: '#03080A', accent: '#C8FF00', extra: '#03080A' },
+  anthropic: { body: '#D97757', limb: '#191919', accent: '#191919', extra: '#191919' },
+  openai: { body: '#10A37F', limb: '#0A0A0A', accent: '#0A0A0A', extra: '#0A0A0A' },
+  ollama: { body: '#9AA7B4', limb: '#111111', accent: '#111111', extra: '#111111' },
+};
+
+// Iterate the identities, not the grid: the grid is a literal copy that a future
+// provider will not automatically extend, and looping over it would silently stop
+// covering every row added after today. A missing row must surface as a FAIL
+// (`expected: undefined`), not a TypeError that kills the rest of the run.
+for (const id of Object.keys(IDENTITIES).filter((key) => key !== 'default')) {
+  check(`${id} palette is the brand grid`, IDENTITIES[id]?.palette, PALETTE_GRID[id]);
+}
+
+/* -------------------------------------------------------------------------- */
+console.log('\n--- palettes are unique, and shins wear the fourth colour ---\n');
+
+const palettes = Object.entries(IDENTITIES)
+  .filter(([id]) => id !== 'default')
+  .map(([, identity]) => ['body', 'limb', 'accent', 'extra'].map((role) => identity.palette?.[role]).join('|'));
+check('no two providers share a four-role palette', new Set(palettes).size, palettes.length);
+
+const shins = ROBOT_PARTS.filter((part) => part.id === 'shinL' || part.id === 'shinR');
+for (const id of Object.keys(IDENTITIES)) {
+  if (id === 'default') continue;
+  const resolved = resolveIdentity(id);
+  const extra = resolved.palette?.extra;
+  check(`${id}: shins carry the fourth colour`,
+    shins.map((part) => resolveRobotColor(part.color, resolved.color, resolved.palette)),
+    [extra, extra]);
+  // Pins that the fourth role is real data, not two `undefined`s comparing equal.
+  check(`${id}: declares a fourth colour`, HEX.test(extra ?? ''), true);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -442,16 +599,45 @@ for (const id of Object.keys(IDENTITIES)) {
 }
 
 /* -------------------------------------------------------------------------- */
-console.log('\n--- colour resolution: palette keys and hex literals ---\n');
+console.log('\n--- colour resolution: the four roles, palettes and fallbacks ---\n');
 
-check('hex literal passes through', resolveRobotColor('#2A2A33', '#5CB8F2'), '#2A2A33');
-check('palette key still works', resolveRobotColor('cream', '#5CB8F2'), ROBOT_COLORS.cream);
-check('body resolves to the accent', resolveRobotColor('body', '#5CB8F2'), '#5CB8F2');
-check(
-  'accent2 falls back to the accent it is given',
-  resolveRobotColor('accent2', '#5CB8F2'),
-  '#5CB8F2',
-);
+const ACCENT = '#5CB8F2';
+check('hex literal passes through', resolveRobotColor('#2A2A33', ACCENT), '#2A2A33');
+check('palette key still works', resolveRobotColor('cream', ACCENT), ROBOT_COLORS.cream);
+check('body falls back to the accent', resolveRobotColor('body', ACCENT), ACCENT);
+check('limb falls back to the darkened body', resolveRobotColor('limb', ACCENT), darkenHex(ACCENT, LIMB_DARKEN));
+check('accent falls back to the body', resolveRobotColor('accent', ACCENT), ACCENT);
+check('extra falls back to the limb', resolveRobotColor('extra', ACCENT), darkenHex(ACCENT, LIMB_DARKEN));
+
+const FOUR = { body: '#6C4DFF', limb: '#2EA99D', accent: '#FFE432', extra: '#00B95C' };
+check('palette overrides body', resolveRobotColor('body', ACCENT, FOUR), '#6C4DFF');
+check('palette overrides limb', resolveRobotColor('limb', ACCENT, FOUR), '#2EA99D');
+check('palette overrides accent', resolveRobotColor('accent', ACCENT, FOUR), '#FFE432');
+check('palette overrides extra', resolveRobotColor('extra', ACCENT, FOUR), '#00B95C');
+check('accent-only palette leaves body on the runtime accent',
+  resolveRobotColor('body', ACCENT, { accent: '#111111' }), ACCENT);
+check('accent-only palette still wins for accent',
+  resolveRobotColor('accent', ACCENT, { accent: '#111111' }), '#111111');
+check('accent-only palette leaves limb on the darkened body',
+  resolveRobotColor('limb', ACCENT, { accent: '#111111' }), darkenHex(ACCENT, LIMB_DARKEN));
+
+// A palette that declares `body` but neither `limb` nor `extra`. This is the only
+// input shape that can tell `darkenHex(body)` apart from `darkenHex(accent)`:
+// every other fallback case has body === accent, so both readings agree and a
+// regression to accent-derivation would slip through. `extra` is asserted on the
+// same input because it falls back through `limb`, so one palette locks both paths.
+const BODY_ONLY = { body: '#FF0000' };
+check('body-only palette derives limb from the body, not the accent',
+  resolveRobotColor('limb', ACCENT, BODY_ONLY), '#d10000');
+check('body-only palette derives extra from the same darkened body',
+  resolveRobotColor('extra', ACCENT, BODY_ONLY), '#d10000');
+check('body-only palette keeps accent on the body',
+  resolveRobotColor('accent', ACCENT, BODY_ONLY), '#FF0000');
+
+// `extra` must inherit a *declared* limb, not re-derive one. A palette with only
+// `limb` is the sole input that can observe the hop: without it, `extra` and `limb`
+// both bottom out in `darkenHex(body)`, and dropping the hop is invisible.
+check('extra inherits a declared limb', resolveRobotColor('extra', ACCENT, { limb: '#2EA99D' }), '#2EA99D');
 
 /* -------------------------------------------------------------------------- */
 console.log('\n--- telemetry: the simulation roster carries real identities ---\n');

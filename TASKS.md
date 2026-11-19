@@ -179,7 +179,7 @@ loop, so 2 ticks/s added 2 frames/s. Fix: value-compared subscriptions
 - The `.glb` path is opt-in (`?model=` or the HUD toggle) and the procedural robot remains the
   default. Shape lives in the file, animation lives in code: `src/lib/robotModel.ts` is the
   single source of truth, `scripts/build-robot-model.mjs` (`npm run build:model`) writes
-  `public/models/worker-robot.glb` (72 488 bytes, 30 parts, 2.365 m tall), and
+  `public/models/worker-robot.glb` (72 616 bytes, 30 parts, 2.365 m tall), and
   `ModelRobot.tsx` drives the cloned `torso`/`head`/`antenna`/`armL`/`armR` nodes with the
   same springs as `WorkerRobot.tsx`. `RobotEffects.tsx` keeps the per-status props for both.
 - `useGLTF` was rejected for this path: it suspends by throwing and then rethrows the
@@ -276,8 +276,8 @@ loop, so 2 ticks/s added 2 frames/s. Fix: value-compared subscriptions
 Each live provider's bot now looks like that provider: a distinctive head silhouette, an antenna
 topper, a chest emblem and the brand colour. Unknown providers keep the original body.
 
-- [x] `src/lib/providerIdentity.ts` — provider key → `ResolvedIdentity` (`id`, `color`, optional
-      `accent2`, `shell`, `topper`, `emblem`), 13 identities, `UNKNOWN_PROVIDER_COLORS`, and
+- [x] `src/lib/providerIdentity.ts` — provider key → `ResolvedIdentity` (`id`, `color`, `palette`,
+      `shell`, `topper`, `emblem`), 13 identities, `UNKNOWN_PROVIDER_COLORS`, and
       `resolveIdentity`. The only place provider strings are matched.
 - [x] `src/lib/robotModel.ts` — `SHELLS` / `TOPPERS` / `EMBLEMS` shape tables, `identityPartsFor()`,
       `identityBounds()`, and the exported `SHELL_ENVELOPE` / `TOPPER_ENVELOPE` / `EMBLEM_ENVELOPE`
@@ -328,8 +328,38 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
 → 15/15 with `pills=4/4` at every viewport, `npm run build:model` → 30 parts / 2.365 m with
 `git diff public/models/` empty, `npm run build` → clean.
 
+## Phase 5.1: Four-Role Brand Palettes
+
+Each bot now wears four brand colours instead of one flat hue. `RobotPalette { body?, limb?,
+accent?, extra? }` in `src/lib/robotModel.ts` names the roles, all optional; `RECOLOR_ROLES` is the
+single list the `.glb` generator and `ModelRobot.tsx` both read, and `resolveRobotColor(key, accent,
+palette?)` resolves a part's colour at render time.
+
+- [x] `src/lib/providerIdentity.ts` — all 12 known providers carry a four-role palette sampled from
+      that provider's own logo. `default` keeps an **empty** palette `{}`, so an unknown provider
+      keeps its old body, limbs, shins, badge and hash-derived colour. One part did move: the bow tie
+      is the `accent` role, so it now takes the runtime hash accent instead of the old baked pink
+      (`#ff6b7a` / `#e05a6a`). The tie is the only part of the default bot that changed.
+- [x] `src/lib/robotModel.ts` — `RobotPalette` and `RECOLOR_ROLES`; `accent2` is gone. Fallback
+      order: `limb` derives from the darkened `body` (not from `accent`), `accent` falls back to
+      `body`, `extra` falls back through `limb` to the darkened `body`. `pink` serves the face's
+      error bar; `pinkDeep` is retained but currently unused.
+- [x] `.glb` body bakes all four roles: 12 meshes carry `userData.recolor` — `cranium` / `chest` =
+      `body`, `bowTieL` / `bowTieR` / `bowTieKnot` / `nameBadgeStripe` = `accent`, `upperArmL` /
+      `upperArmR` / `thighL` / `thighR` = `limb`, `shinL` / `shinR` = `extra`.
+- [x] `scripts/build-robot-model.mjs` fails if any part carries the wrong role after the round trip.
+- [x] `scripts/identity-render.mjs` imports the shipping tables and compares **every** part's mesh
+      colour against the hex its role resolves to; `hasModelRoot` proves the `.glb` run is not
+      measuring the procedural fallback.
+
+**Phase 5.1 verification:** `npm run identity:test` → 723 assertions, `npm run identity:render` →
+42 assertions (procedural rig), `npm run identity:render:model` → 42 assertions (`.glb` rig),
+`npm run build:model` → `parts 30`, `height 2.365 m`, `tintable 12 meshes` with a deterministic
+`.glb` sha256 across runs, `npx tsc --noEmit` → 0, `npx eslint` → 0.
+
 ## Phase 5.2: Collapsible Side Panel
 
 - The right panel folds into a 56px rail with a single logo button (useUiStore.panelCollapsed, session-only, never persisted). Unfolding restores the same 320px panel with the same sections; the new header row owns the toggle and mirrors aria-expanded.
 - Geometry stays in src/lib/hudLayout.ts: PANEL_RAIL_WIDTH / PANEL_RAIL_FOOTPRINT and visibleSceneWidth(canvasWidth, collapsed), so the camera gives the office the released width back instead of leaving a hole. CommandCenter publishes --hud-right-offset and Office Vitals follows the panel/rail edge.
+- The scene is full-bleed: the canvas covers the viewport and the panel floats over it. It used to stop at the panel column's edge, so the gutter, the right margin and the area below the panel were painted by `main`'s `bg-office-sky` — a hard blue band where the floor and wall should continue. Collapsing to the 56px rail made that seam obvious, which is what surfaced it. `OfficeRoom`'s floor also runs to 13 units (walls stay at 9.5) because the camera sees past the walled room at the bottom-right of the strip the panel covers.
 - Verification: npm run layout:unit 16/16, npm run layout:test 15/15, npx tsc --noEmit 0, npx eslint 0 errors, npm run smoke exit 0, npm run build clean, plus a 1440x900 probe measuring 320 -> 56 -> 320 with the vitals gap unchanged.
