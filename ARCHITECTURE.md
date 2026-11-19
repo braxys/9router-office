@@ -62,9 +62,10 @@ data edit — one entry in the identity table plus any new shape rows — with n
 Both bodies read the same tables. The procedural rig renders `RobotParts` (shared body) plus
 `RobotIdentityParts` (identity only); the `.glb` path already carries the baked shared body, so it
 mounts **only** `RobotIdentityParts`, portal-ed onto the model's own `head` / `torso` / `antenna`
-joints — a shell has to follow the head when it looks around and tilts on `ERROR`. When a topper
-replaces the ball, the baked `antennaBall` mesh is hidden. The topper's pulse lives in a wrapper
-group so every identity keeps the ball's old "alive" feel.
+joints — a shell has to follow the head when it looks around and tilts on `ERROR`. `<AntennaTopper>`
+is the single owner of whatever sits on the antenna: it renders the provider's topper, or the same
+yellow ball for a `ball` identity, so the baked `antennaBall` mesh is always hidden. The topper's
+pulse lives in a wrapper group so every identity keeps the ball's old "alive" feel.
 
 Identity geometry is bounded by three exported envelopes (`SHELL_ENVELOPE`, `TOPPER_ENVELOPE`,
 `EMBLEM_ENVELOPE`) unioned into `ROBOT_ENVELOPE_TOP` / `ROBOT_ENVELOPE_HEIGHT`. Those drive the name
@@ -281,7 +282,9 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   `ERROR`, and what lets the antenna wobble carry the topper with it. Two details worth keeping:
   `RobotIdentityParts` is used rather than `RobotParts`, because the clone already contains the baked
   shared body and mounting it again would double every block; and the baked `antennaBall` is hidden
-  whenever the identity's topper replaces it. The joints are looked up in a `useMemo` (the portals
+  **unconditionally**, because `<AntennaTopper>` owns that case too and renders the ball itself —
+  gating the hide on "a topper replaces it" left `default`/unknown providers with two identical
+  spheres z-fighting at the same position. The joints are looked up in a `useMemo` (the portals
   need them during render) while the frame loop reads them through a ref — `react-hooks/purity`
   forbids mutating a render-scoped value after render.
 
@@ -376,10 +379,12 @@ scripts/identity-render.mjs    live-graph render gate for the per-provider ident
 tables actually mounted on the live three.js graph?* A colour swap looks identical in a PNG. It
 needs `?capture=1`, which is what makes `Scene` publish `window.__office` (scene, camera, and a
 `robots` getter) from the `SceneBridge` component. It asserts, per bot on stage: identity meshes are
-mounted, the baked `antennaBall` visibility matches the topper, exactly one pulsing topper exists,
-the accent colour is the identity colour, and **the name pill's bottom edge clears the topmost
-identity vertex**. That last one is a real regression guard — `<Html center>` used to drop half the
-pill (~27 px ≈ 0.19 m) back over the topper on three of four bots.
+mounted, exactly one visible antenna ball survives and only for a `ball` identity, exactly one pulsing
+topper exists, the accent colour is the identity colour, and **the name pill's bottom edge clears the
+topmost identity vertex**. The pill check is a real regression guard — `<Html center>` used to drop
+half the pill (~27 px ≈ 0.19 m) back over the topper on three of four bots. The ball count guards the
+other duplicate-owner failure: it is what a `default` bot would trip if the baked `antennaBall` were
+left visible next to `AntennaTopper`'s own ball.
 
 Run it on both bodies; the `.glb` path has its own plumbing (portals, hidden baked ball):
 
