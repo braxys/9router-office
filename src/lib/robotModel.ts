@@ -22,16 +22,16 @@
 /**
  * Palette keys instead of raw hex, so a recolour is one edit.
  *
- * `body`, `limb`, `accent` and `accent2` are per-agent: they resolve from the
- * agent's identity colour at runtime. `limb` is that colour darkened, exactly as
- * the original hand-written rig computed it; `accent2` is the identity's second
- * brand colour (see `RobotParts`, which supplies it per part).
+ * `body`, `limb`, `accent` and `extra` are the four per-agent roles: they come
+ * from the agent's identity palette (`RobotPalette`), and `accent` — the runtime
+ * hex the agent carries — is the fallback for a provider with no palette entry.
+ * The rest are the fixed office colours every robot shares.
  */
 export type PaletteKey =
   | 'body'
   | 'limb'
   | 'accent'
-  | 'accent2'
+  | 'extra'
   | 'cream'
   | 'ink'
   | 'blush'
@@ -44,8 +44,26 @@ export type PaletteKey =
 /** A literal brand colour, e.g. `#2A2A33`. Passed through untouched. */
 export type HexColor = `#${string}`;
 
+/**
+ * One agent's four brand roles, taken from its real logo.
+ *
+ * Every role is optional, and a gap falls back to the runtime `accent` rather
+ * than to a hard-coded hex: that is what keeps a provider with no table entry
+ * exactly as it looks today, with no data written for it.
+ */
+export interface RobotPalette {
+  /** Dominant brand colour: cranium + chest. */
+  body?: string;
+  /** Second brand colour: upper arms + thighs. */
+  limb?: string;
+  /** Third brand colour: bow tie, badge stripe, crest, topper, emblem. */
+  accent?: string;
+  /** Fourth brand colour: shins. */
+  extra?: string;
+}
+
 export const ROBOT_COLORS: Record<
-  Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'accent2'>,
+  Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'extra'>,
   string
 > = {
   cream: '#fdfbf6',
@@ -65,27 +83,48 @@ export const ROBOT_BODY_DEFAULT = '#5CB8F2';
 export const LIMB_DARKEN = 0.82;
 
 /**
+ * The roles that are painted per agent, in brand order.
+ *
+ * Single source of truth for two consumers that must never disagree: the `.glb`
+ * generator bakes exactly these into `userData.recolor`, and `ModelRobot` tints
+ * exactly these at load time. A role in one list but not the other is a mesh
+ * that silently keeps the neutral build colour — the bug class this list exists
+ * to make impossible.
+ */
+export const RECOLOR_ROLES = ['body', 'limb', 'accent', 'extra'] as const;
+
+export type RecolorRole = (typeof RECOLOR_ROLES)[number];
+
+/**
  * Resolves a palette key to a hex colour for one agent.
  * Pure and allocation-light; safe to call during render.
  *
- * A hex literal is its own answer — that is how an identity paints a part in a
- * second brand colour without a palette key per provider.
+ * A hex literal is its own answer. A declared role wins over anything derived;
+ * an undeclared one falls back, and `limb` falls back through `body` — never
+ * straight from `accent` — so a palette that declares `body` but not `limb`
+ * still gets a limb that belongs to that body. Only a provider with no palette
+ * at all lands on `darkenHex(accent)`, which is the old two-role look.
  */
-export function resolveRobotColor(key: PaletteKey | HexColor, accent: string): string {
+export function resolveRobotColor(
+  key: PaletteKey | HexColor,
+  accent: string,
+  palette?: RobotPalette,
+): string {
   if (key.startsWith('#')) return key;
+
+  const body = palette?.body ?? accent;
   switch (key) {
     case 'body':
-    case 'accent':
-    // `accent2` is the identity's second brand colour. Only `RobotParts` knows
-    // it, and it passes it as `accent` for those parts; a caller that has no
-    // second colour (the `.glb` generator, which never renders identity parts)
-    // gets the body colour rather than a missing key.
-    case 'accent2':
-      return accent;
+      return body;
     case 'limb':
-      return darkenHex(accent, LIMB_DARKEN);
+      return palette?.limb ?? darkenHex(body, LIMB_DARKEN);
+    case 'accent':
+      return palette?.accent ?? body;
+    case 'extra':
+      // `limb`'s own fallback, written out so `extra` can never disagree with it.
+      return palette?.extra ?? palette?.limb ?? darkenHex(body, LIMB_DARKEN);
     default:
-      return ROBOT_COLORS[key as Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'accent2'>];
+      return ROBOT_COLORS[key as Exclude<PaletteKey, 'body' | 'limb' | 'accent' | 'extra'>];
   }
 }
 
@@ -168,7 +207,12 @@ export interface RobotPart {
   segments?: number;
 }
 
-/** Legs sit under the root: thighs on the seat, shins down, feet flat. */
+/**
+ * Legs sit under the root: thighs on the seat, shins down, feet flat.
+ *
+ * Thighs wear the second brand role, shins the fourth — that is what gives a
+ * four-colour logo (Antigravity, Gemini) its full spread without a gradient.
+ */
 const LEG_X = [-0.17, 0.17] as const;
 
 const LEG_PARTS: RobotPart[] = LEG_X.flatMap((x, i) => {
@@ -188,7 +232,7 @@ const LEG_PARTS: RobotPart[] = LEG_X.flatMap((x, i) => {
       shape: 'box' as const,
       size: [0.18, 0.56, 0.18] as const,
       position: [x, -0.09, 0.44] as const,
-      color: 'limb' as const,
+      color: 'extra' as const,
     },
     {
       id: `foot${side}`,
@@ -236,7 +280,7 @@ export const ROBOT_PARTS: readonly RobotPart[] = [
     size: [0.15, 0.11, 0.04],
     position: [-0.1, 0.76, 0.26],
     rotation: [0, 0, 0.25],
-    color: 'pink',
+    color: 'accent',
   },
   {
     id: 'bowTieR',
@@ -245,7 +289,7 @@ export const ROBOT_PARTS: readonly RobotPart[] = [
     size: [0.15, 0.11, 0.04],
     position: [0.1, 0.76, 0.26],
     rotation: [0, 0, -0.25],
-    color: 'pink',
+    color: 'accent',
   },
   {
     id: 'bowTieKnot',
@@ -253,7 +297,7 @@ export const ROBOT_PARTS: readonly RobotPart[] = [
     shape: 'box',
     size: [0.07, 0.07, 0.04],
     position: [0, 0.76, 0.28],
-    color: 'pinkDeep',
+    color: 'accent',
   },
   {
     id: 'nameBadge',
@@ -495,7 +539,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.16, 0.3, 0.16],
       position: [-0.26, 0.42, 0],
       rotation: [0, 0, 0.35],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellEarR',
@@ -504,11 +548,11 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.16, 0.3, 0.16],
       position: [0.26, 0.42, 0],
       rotation: [0, 0, -0.35],
-      color: 'accent2',
+      color: 'accent',
     },
   ],
 
-  /** Antigravity: a doorway arch wrapping the head, the crown in the second brand colour. */
+  /** Antigravity: a doorway arch wrapping the head, the crown in the accent role. */
   arch: [
     {
       id: 'shellArchTop',
@@ -516,7 +560,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.96, 0.13, 0.62],
       position: [0, 0.35, 0],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellArchPostL',
@@ -547,7 +591,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.56, 0.09, 0.56],
       position: [0, 0.34, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellHexBottom',
@@ -555,7 +599,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.56, 0.09, 0.56],
       position: [0, -0.34, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellHexChamferTR',
@@ -564,7 +608,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.2, 0.09, 0.56],
       position: [0.37, 0.3, 0],
       rotation: [0, 0, -Math.PI / 4],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellHexChamferTL',
@@ -573,7 +617,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.2, 0.09, 0.56],
       position: [-0.37, 0.3, 0],
       rotation: [0, 0, Math.PI / 4],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellHexChamferBR',
@@ -582,7 +626,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.2, 0.09, 0.56],
       position: [0.37, -0.3, 0],
       rotation: [0, 0, Math.PI / 4],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellHexChamferBL',
@@ -591,7 +635,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       size: [0.2, 0.09, 0.56],
       position: [-0.37, -0.3, 0],
       rotation: [0, 0, -Math.PI / 4],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -603,7 +647,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.16, 0.52],
       position: [-0.3, 0.36, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellPixel2',
@@ -611,7 +655,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.26, 0.52],
       position: [-0.1, 0.41, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellPixel3',
@@ -619,7 +663,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.2, 0.52],
       position: [0.1, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellPixel4',
@@ -627,7 +671,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.12, 0.52],
       position: [0.3, 0.34, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -648,7 +692,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       radiusTop: 0.18,
       radiusBottom: 0.18,
       segments: 16,
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'shellRoundCapZ',
@@ -660,7 +704,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       radiusTop: 0.18,
       radiusBottom: 0.18,
       segments: 16,
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -672,7 +716,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.82, 0.14, 0.6],
       position: [0, 0.31, 0],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellHairL',
@@ -680,7 +724,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.2, 0.06],
       position: [-0.24, 0.25, 0.27],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellHairMidL',
@@ -688,7 +732,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.16, 0.06],
       position: [-0.12, 0.23, 0.27],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellHairMid',
@@ -696,7 +740,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.22, 0.06],
       position: [0, 0.26, 0.27],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellHairMidR',
@@ -704,7 +748,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.16, 0.06],
       position: [0.12, 0.23, 0.27],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'shellHairR',
@@ -712,7 +756,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.2, 0.06],
       position: [0.24, 0.25, 0.27],
-      color: 'accent2',
+      color: 'accent',
     },
   ],
 };
@@ -736,7 +780,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.06, 0.09, 0.05],
       position: [-0.055, 0.44, 0],
       rotation: [0, 0, 0.4],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topCatEarR',
@@ -745,7 +789,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.06, 0.09, 0.05],
       position: [0.055, 0.44, 0],
       rotation: [0, 0, -0.4],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topCatFace',
@@ -765,7 +809,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.05, 0.06],
       position: [0, 0.47, 0],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topArchLegL',
@@ -794,7 +838,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.05, 0.05],
       position: [0, 0.38, 0],
       rotation: [0, 0, 0.9],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKnotB',
@@ -803,7 +847,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.05, 0.05],
       position: [0, 0.38, 0],
       rotation: [0, 0, -0.9],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKnotC',
@@ -811,7 +855,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.05, 0.05],
       position: [0, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -833,7 +877,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.22, 0.06, 0.05],
       position: [0, 0.38, 0],
       rotation: [0, 0, -Math.PI / 4],
-      color: 'body',
+      color: 'limb',
     },
     {
       id: 'topSparkleH',
@@ -841,7 +885,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.16, 0.05, 0.05],
       position: [0, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topSparkleV',
@@ -849,7 +893,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.16, 0.05],
       position: [0, 0.38, 0],
-      color: 'body',
+      color: 'extra',
     },
   ],
 
@@ -861,7 +905,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.22, 0.05],
       position: [-0.05, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKiloArm1',
@@ -869,7 +913,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.06, 0.06, 0.05],
       position: [0, 0.44, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKiloArm2',
@@ -877,7 +921,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.06, 0.06, 0.05],
       position: [0.055, 0.47, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKiloLeg1',
@@ -885,7 +929,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.06, 0.06, 0.05],
       position: [0, 0.32, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topKiloLeg2',
@@ -893,7 +937,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.06, 0.06, 0.05],
       position: [0.055, 0.29, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -906,7 +950,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.05, 0.05],
       position: [0, 0.42, 0],
       rotation: [0, 0, 0.35],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topEyeLidDown',
@@ -915,7 +959,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.05, 0.05],
       position: [0, 0.34, 0],
       rotation: [0, 0, -0.35],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topEyePupil',
@@ -935,7 +979,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.06, 0.05],
       position: [0, 0.47, 0],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topFringeL',
@@ -943,7 +987,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.16, 0.05],
       position: [-0.06, 0.36, 0.02],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topFringeM',
@@ -951,7 +995,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.2, 0.05],
       position: [0, 0.38, 0.02],
-      color: 'accent2',
+      color: 'accent',
     },
     {
       id: 'topFringeR',
@@ -959,7 +1003,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.16, 0.05],
       position: [0.06, 0.36, 0.02],
-      color: 'accent2',
+      color: 'accent',
     },
   ],
 
@@ -971,7 +1015,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.05, 0.05],
       position: [0, 0.46, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topTermChevUp',
@@ -980,7 +1024,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.05, 0.05],
       position: [-0.04, 0.4, 0],
       rotation: [0, 0, -0.7],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topTermChevDown',
@@ -989,7 +1033,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.05, 0.05],
       position: [-0.04, 0.3, 0],
       rotation: [0, 0, 0.7],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topTermUnderscore',
@@ -997,7 +1041,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.05, 0.05],
       position: [0.05, 0.28, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -1009,7 +1053,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.16, 0.04, 0.05],
       position: [-0.01, 0.46, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topRouterHead1',
@@ -1017,7 +1061,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.1, 0.05],
       position: [0.08, 0.46, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topRouterShaft2',
@@ -1025,7 +1069,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.16, 0.04, 0.05],
       position: [0.01, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topRouterHead2',
@@ -1033,7 +1077,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.1, 0.05],
       position: [-0.08, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topRouterShaft3',
@@ -1041,7 +1085,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.16, 0.04, 0.05],
       position: [-0.01, 0.3, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topRouterHead3',
@@ -1049,7 +1093,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.1, 0.05],
       position: [0.08, 0.3, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -1062,7 +1106,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.05],
       position: [0, 0.38, 0],
       rotation: [0, 0, 0.55],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topBurstB',
@@ -1071,7 +1115,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.05],
       position: [0, 0.38, 0],
       rotation: [0, 0, -0.55],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topBurstC',
@@ -1079,7 +1123,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.045, 0.05],
       position: [0, 0.38, 0],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -1091,7 +1135,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.04, 0.05],
       position: [0, 0.47, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topOpenaiBottom',
@@ -1099,7 +1143,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.04, 0.05],
       position: [0, 0.29, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topOpenaiUR',
@@ -1108,7 +1152,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.04, 0.05],
       position: [0.045, 0.42, 0],
       rotation: [0, 0, Math.PI / 3],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topOpenaiUL',
@@ -1117,7 +1161,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.04, 0.05],
       position: [-0.045, 0.42, 0],
       rotation: [0, 0, -Math.PI / 3],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topOpenaiLR',
@@ -1126,7 +1170,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.04, 0.05],
       position: [0.045, 0.34, 0],
       rotation: [0, 0, -Math.PI / 3],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topOpenaiLL',
@@ -1135,7 +1179,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       size: [0.1, 0.04, 0.05],
       position: [-0.045, 0.34, 0],
       rotation: [0, 0, Math.PI / 3],
-      color: 'body',
+      color: 'accent',
     },
   ],
 
@@ -1147,7 +1191,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.12, 0.06],
       position: [0, 0.35, 0.01],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topLlamaEarL',
@@ -1155,7 +1199,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.04, 0.1, 0.05],
       position: [-0.035, 0.46, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topLlamaEarR',
@@ -1163,7 +1207,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.04, 0.1, 0.05],
       position: [0.035, 0.46, 0],
-      color: 'body',
+      color: 'accent',
     },
     {
       id: 'topLlamaMuzzle',
@@ -1195,7 +1239,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.07, 0.07, 0.012],
       position: [-0.06, 0.49, 0.267],
       rotation: [0, 0, 0.5],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1205,7 +1249,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.07, 0.07, 0.012],
       position: [0.06, 0.49, 0.267],
       rotation: [0, 0, -0.5],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1214,7 +1258,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.16, 0.13, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'accent2',
+      color: 'body',
       unlit: true,
     },
   ],
@@ -1226,7 +1270,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.24, 0.05, 0.012],
       position: [0, 0.47, 0.267],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1235,7 +1279,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.18, 0.012],
       position: [-0.095, 0.38, 0.267],
-      color: 'accent2',
+      color: 'body',
       unlit: true,
     },
     {
@@ -1244,7 +1288,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.18, 0.012],
       position: [0.095, 0.38, 0.267],
-      color: 'accent2',
+      color: 'body',
       unlit: true,
     },
   ],
@@ -1257,7 +1301,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
       rotation: [0, 0, 0.9],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1267,7 +1311,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
       rotation: [0, 0, -0.9],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1276,7 +1320,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1299,7 +1343,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.24, 0.05, 0.012],
       position: [0, 0.4, 0.267],
       rotation: [0, 0, -Math.PI / 4],
-      color: 'body',
+      color: 'limb',
       unlit: true,
     },
     {
@@ -1308,7 +1352,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.14, 0.045, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1317,7 +1361,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.14, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'body',
+      color: 'extra',
       unlit: true,
     },
   ],
@@ -1329,7 +1373,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.2, 0.012],
       position: [-0.045, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1338,7 +1382,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.05, 0.012],
       position: [0, 0.46, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1347,7 +1391,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.05, 0.012],
       position: [0.045, 0.49, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1356,7 +1400,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.05, 0.012],
       position: [0, 0.34, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1365,7 +1409,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.05, 0.05, 0.012],
       position: [0.045, 0.31, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1378,7 +1422,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.24, 0.045, 0.012],
       position: [0, 0.44, 0.267],
       rotation: [0, 0, 0.35],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1388,7 +1432,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.24, 0.045, 0.012],
       position: [0, 0.36, 0.267],
       rotation: [0, 0, -0.35],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1409,7 +1453,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.05, 0.012],
       position: [0, 0.48, 0.267],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1418,7 +1462,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.14, 0.012],
       position: [-0.055, 0.38, 0.267],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1427,7 +1471,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.18, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1436,7 +1480,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.14, 0.012],
       position: [0.055, 0.38, 0.267],
-      color: 'accent2',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1448,7 +1492,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.045, 0.012],
       position: [0, 0.47, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1458,7 +1502,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.045, 0.012],
       position: [-0.035, 0.42, 0.267],
       rotation: [0, 0, -0.7],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1468,7 +1512,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.045, 0.012],
       position: [-0.035, 0.34, 0.267],
       rotation: [0, 0, 0.7],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1477,7 +1521,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.09, 0.045, 0.012],
       position: [0.045, 0.32, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1489,7 +1533,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.14, 0.035, 0.012],
       position: [-0.01, 0.47, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1498,7 +1542,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.09, 0.012],
       position: [0.0725, 0.47, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1507,7 +1551,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.14, 0.035, 0.012],
       position: [0.01, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1516,7 +1560,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.09, 0.012],
       position: [-0.0725, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1525,7 +1569,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.14, 0.035, 0.012],
       position: [-0.01, 0.33, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1534,7 +1578,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.045, 0.09, 0.012],
       position: [0.0725, 0.33, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1547,7 +1591,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
       rotation: [0, 0, 0.55],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1557,7 +1601,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
       rotation: [0, 0, -0.55],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1566,7 +1610,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.2, 0.045, 0.012],
       position: [0, 0.4, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1578,7 +1622,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.035, 0.012],
       position: [0, 0.47, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1587,7 +1631,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.035, 0.012],
       position: [0, 0.33, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1597,7 +1641,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.035, 0.012],
       position: [0.0425, 0.44, 0.267],
       rotation: [0, 0, Math.PI / 3],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1607,7 +1651,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.035, 0.012],
       position: [-0.0425, 0.44, 0.267],
       rotation: [0, 0, -Math.PI / 3],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1617,7 +1661,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.035, 0.012],
       position: [0.0425, 0.36, 0.267],
       rotation: [0, 0, -Math.PI / 3],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1627,7 +1671,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       size: [0.09, 0.035, 0.012],
       position: [-0.0425, 0.36, 0.267],
       rotation: [0, 0, Math.PI / 3],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
   ],
@@ -1639,7 +1683,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.1, 0.12, 0.012],
       position: [0, 0.37, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1648,7 +1692,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.035, 0.08, 0.012],
       position: [-0.035, 0.46, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
@@ -1657,7 +1701,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.035, 0.08, 0.012],
       position: [0.035, 0.46, 0.267],
-      color: 'body',
+      color: 'accent',
       unlit: true,
     },
     {
