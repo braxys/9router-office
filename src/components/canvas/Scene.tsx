@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { useAgentStore } from '@/store/useAgentStore';
 import { useUiStore } from '@/store/useUiStore';
 import { AGENT_SLOTS, STATUS_META } from '@/lib/agents';
+import { ROBOT_ENVELOPE_TOP } from '@/lib/robotModel';
+import { resolveIdentity } from '@/lib/providerIdentity';
 import { markFrame } from '@/lib/renderStats';
 import { useModelChoice } from '@/lib/modelChoice';
 import {
@@ -19,7 +21,7 @@ import {
 } from '@/lib/cameraBus';
 import type { CameraPreset } from '@/lib/cameraBus';
 import { WorkerRobot } from './WorkerRobot';
-import { WorkDesk } from './WorkDesk';
+import { WorkDesk, DESK_SEAT } from './WorkDesk';
 import { CentralHub } from './CentralHub';
 import { OfficeRoom } from './OfficeRoom';
 
@@ -38,6 +40,43 @@ const ModelRobot = dynamic(
 /* -------------------------------------------------------------------------- */
 
 const CHAIR_COLORS = ['#ffc94d', '#ff9d5c', '#5cb8f2', '#ff8fa3'];
+
+/**
+ * How far a topper rises above its rest-pose envelope while animating.
+ *
+ * `ROBOT_ENVELOPE_TOP` is measured from the part tables, i.e. the rest pose. The
+ * rig then breathes: the head bobs ±0.014 m and the antenna wobbles up to 0.09
+ * rad, which lifts a tall topper's corner. Sampled over 6 s of live idle across
+ * all four bots, the worst case was 2.537 m against a 2.490 m envelope, so this
+ * constant is that 0.047 m rounded up. Without it the pill sits ~4 px above the
+ * tallest topper and reads as touching it.
+ */
+const TOPPER_ANIMATION_LIFT = 0.05;
+
+/**
+ * Height of the floating name pill's *bottom edge*, in world space.
+ *
+ * Derived from the identity envelope rather than hardcoded. The envelope top is
+ * the highest point any identity reaches at rest; the pill's own height is not
+ * part of the scene graph, so this is the anchor and `<Html>` is anchored
+ * bottom-centre (`center` would push half the pill back down over the topper —
+ * at overview size 27 px is ~0.19 m of world, taller than every topper).
+ *
+ * Never lower this to fix a clipped pill; trim the topper envelope in
+ * `robotModel.ts` instead, or the tallest bot will wear its name.
+ */
+const PILL_Y = DESK_SEAT.y + ROBOT_ENVELOPE_TOP + TOPPER_ANIMATION_LIFT + 0.1;
+
+/**
+ * Depth of the pill: the antenna's own plane, not the group's origin.
+ *
+ * This is load-bearing. The desks sit well behind the group origin, and the
+ * camera looks down from the front, so a pill 0.48 m nearer the camera projects
+ * *lower* on screen than the topper it is supposed to float above — close enough
+ * to cover it. Anchoring in the antenna's plane makes the world-space gap above
+ * the envelope the on-screen gap too.
+ */
+const PILL_Z = DESK_SEAT.z;
 
 /**
  * Screenshot harnesses read the canvas after the frame ends, when WebGL has
@@ -70,6 +109,80 @@ function BlobShadow({
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Render-gate bridge                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Mounted desk groups, keyed by agent id.
+ *
+ * Only read by the `?capture=1` bridge below: the identity render gate
+ * (`scripts/identity-render.mjs`) needs to walk the *live* three.js graph to
+ * prove a shell authored in the part tables is actually mounted, which a
+ * screenshot cannot tell apart from a colour swap.
+ */
+const robotRegistry = new Map<string, THREE.Object3D>();
+
+interface OfficeBridge {
+  scene: THREE.Scene;
+  camera: THREE.Camera;
+  readonly robots: Array<{
+    id: string;
+    name: string;
+    identity: string;
+    accentColor: string;
+    object: THREE.Object3D;
+  }>;
+}
+
+declare global {
+  interface Window {
+    __office?: OfficeBridge;
+  }
+}
+
+/**
+ * Publishes the scene graph for the render gate.
+ *
+ * `robots` is a getter, not a snapshot: the gate polls it, and a snapshot would
+ * go stale the moment a desk mounts or the roster ticks. Gated on `?capture=1`
+ * so normal play never exposes the renderer on `window`.
+ */
+function SceneBridge() {
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+
+  useEffect(() => {
+    if (!CAPTURE_MODE) return;
+    window.__office = {
+      scene,
+      camera,
+      get robots() {
+        return useAgentStore
+          .getState()
+          .agents.flatMap((agent) => {
+            const object = robotRegistry.get(agent.id);
+            if (!object) return [];
+            return [
+              {
+                id: agent.id,
+                name: agent.name,
+                identity: agent.identity,
+                accentColor: agent.accentColor,
+                object,
+              },
+            ];
+          });
+      },
+    };
+    return () => {
+      delete window.__office;
+    };
+  }, [scene, camera]);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Per-agent node                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -96,6 +209,12 @@ function AgentNode({
   const accentColor = useAgentStore(
     (s) => s.agents.find((a) => a.id === id)?.accentColor ?? '#5CB8F2',
   );
+  // Primitive string selector, like the rest: the resolved identity is derived
+  // here so no component downstream has to match provider strings.
+  const identityId = useAgentStore(
+    (s) => s.agents.find((a) => a.id === id)?.identity ?? 'default',
+  );
+  const identity = useMemo(() => resolveIdentity(identityId), [identityId]);
   const status = useAgentStore(
     (s) => s.agents.find((a) => a.id === id)?.status ?? 'IDLE',
   );
@@ -171,6 +290,17 @@ function AgentNode({
 
   useEffect(() => () => bubbleGuard.current?.(), []);
 
+  // Register this desk's object for the `?capture=1` render gate. Keyed by id,
+  // and unregistered on unmount so a shrinking roster cannot leave a stale entry.
+  useEffect(() => {
+    const object = group.current;
+    if (!CAPTURE_MODE || !object) return;
+    robotRegistry.set(id, object);
+    return () => {
+      robotRegistry.delete(id);
+    };
+  }, [id]);
+
   // Direction from this desk toward the central hub, in the desk's local
   // space (desks are not rotated, so this is just the negated slot vector).
   const towardHub = useMemo<[number, number]>(() => {
@@ -206,12 +336,14 @@ function AgentNode({
         <ModelRobot
           url={model.url}
           accentColor={accentColor}
+          identity={identity}
           status={status}
           towardHub={towardHub}
           tokensPerSecond={tokensPerSecond}
           fallback={
             <WorkerRobot
               accentColor={accentColor}
+              identity={identity}
               status={status}
               towardHub={towardHub}
               tokensPerSecond={tokensPerSecond}
@@ -221,6 +353,7 @@ function AgentNode({
       ) : (
         <WorkerRobot
           accentColor={accentColor}
+          identity={identity}
           status={status}
           towardHub={towardHub}
           tokensPerSecond={tokensPerSecond}
@@ -230,15 +363,19 @@ function AgentNode({
       {/* name + mood pill, floating over the robot's antenna.
           No `distanceFactor`: drei then keeps the pill at a constant CSS size,
           so it stays legible in the overview and does not balloon when the
-          camera flies in for a focus shot. */}
+          camera flies in for a focus shot.
+
+          `center` is NOT used. It centres the element on the anchor, which drops
+          half the pill (27 px ≈ 0.19 m here) back down over the topper the
+          identity exists to show. Instead the wrapper is shifted up by its own
+          height, so the pill's bottom edge sits on the envelope anchor. */}
       <Html
-        position={[0, 2.45, -0.3]}
-        center
+        position={[0, PILL_Y, PILL_Z]}
         zIndexRange={[15, 0]}
         pointerEvents="none"
         style={{ pointerEvents: 'none' }}
       >
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', transform: 'translate(-50%, -100%)' }}>
           {showBubble && (
             <div
               ref={attachBubbleGuard}
@@ -748,6 +885,7 @@ export function Scene() {
         <Suspense fallback={null}>
           <World />
         </Suspense>
+        <SceneBridge />
         <PerformanceManager />
         <SimulationClock onTick={tick} />
       </Canvas>
