@@ -12,6 +12,7 @@
     "layout:test": "node scripts/layout-check.mjs",
     "perf": "node scripts/perf.mjs",
     "status:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/status-rules.mjs",
+    "identity:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-rules.mjs",
     "status:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/explain-status.mjs",
     "build:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-robot-model.mjs"
   },
