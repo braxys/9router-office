@@ -276,8 +276,8 @@ loop, so 2 ticks/s added 2 frames/s. Fix: value-compared subscriptions
 Each live provider's bot now looks like that provider: a distinctive head silhouette, an antenna
 topper, a chest emblem and the brand colour. Unknown providers keep the original body.
 
-- [x] `src/lib/providerIdentity.ts` — provider key → `ResolvedIdentity` (`id`, `color`, optional
-      `accent2`, `shell`, `topper`, `emblem`), 13 identities, `UNKNOWN_PROVIDER_COLORS`, and
+- [x] `src/lib/providerIdentity.ts` — provider key → `ResolvedIdentity` (`id`, `color`, `palette`,
+      `shell`, `topper`, `emblem`), 13 identities, `UNKNOWN_PROVIDER_COLORS`, and
       `resolveIdentity`. The only place provider strings are matched.
 - [x] `src/lib/robotModel.ts` — `SHELLS` / `TOPPERS` / `EMBLEMS` shape tables, `identityPartsFor()`,
       `identityBounds()`, and the exported `SHELL_ENVELOPE` / `TOPPER_ENVELOPE` / `EMBLEM_ENVELOPE`
@@ -327,3 +327,30 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
 1920x1080), `npx tsc --noEmit` → 0, `npx eslint` → 0, `npm run smoke` → clean, `npm run layout:test`
 → 15/15 with `pills=4/4` at every viewport, `npm run build:model` → 30 parts / 2.365 m with
 `git diff public/models/` empty, `npm run build` → clean.
+
+## Phase 5.1: Four-Role Brand Palettes
+
+Each bot now wears four brand colours instead of one flat hue. `RobotPalette { body?, limb?,
+accent?, extra? }` in `src/lib/robotModel.ts` names the roles, all optional; `RECOLOR_ROLES` is the
+single list the `.glb` generator and `ModelRobot.tsx` both read, and `resolveRobotColor(key, accent,
+palette?)` resolves a part's colour at render time.
+
+- [x] `src/lib/providerIdentity.ts` — all 12 known providers carry a four-role palette sampled from
+      that provider's own logo. `default` keeps an **empty** palette `{}`, so an unknown provider
+      keeps exactly the old look through the runtime hash colour.
+- [x] `src/lib/robotModel.ts` — `RobotPalette` and `RECOLOR_ROLES`; `accent2` is gone. Fallback
+      order: `limb` derives from the darkened `body` (not from `accent`), `accent` falls back to
+      `body`, `extra` falls back through `limb` to the darkened `body`. `pink` / `pinkDeep` remain
+      only for the face's error bar.
+- [x] `.glb` body bakes all four roles: 12 meshes carry `userData.recolor` — `cranium` / `chest` =
+      `body`, `bowTieL` / `bowTieR` / `bowTieKnot` / `nameBadgeStripe` = `accent`, `upperArmL` /
+      `upperArmR` / `thighL` / `thighR` = `limb`, `shinL` / `shinR` = `extra`.
+- [x] `scripts/build-robot-model.mjs` fails if any part carries the wrong role after the round trip.
+- [x] `scripts/identity-render.mjs` imports the shipping tables and compares **every** part's mesh
+      colour against the hex its role resolves to; `hasModelRoot` proves the `.glb` run is not
+      measuring the procedural fallback.
+
+**Phase 5.1 verification:** `npm run identity:test` → 715 assertions, `npm run identity:render` →
+42 assertions (procedural rig), `npm run identity:render:model` → 42 assertions (`.glb` rig),
+`npm run build:model` → `parts 30`, `height 2.365 m`, `tintable 12 meshes` with a deterministic
+`.glb` sha256 across runs, `npx tsc --noEmit` → 0, `npx eslint` → 0.

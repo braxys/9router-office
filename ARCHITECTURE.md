@@ -51,13 +51,17 @@ place.
 Every known provider gets a **silhouette**, not just a colour swap. Three shape tables in
 `src/lib/robotModel.ts` — `SHELLS` (head crest), `TOPPERS` (antenna topper) and `EMBLEMS` (chest
 badge) — are keyed by `IdentityId`. `src/lib/providerIdentity.ts` maps a provider key to a
-`ResolvedIdentity` (`id`, `color`, optional `accent2`, `shell`, `topper`, `emblem`) and is the only
+`ResolvedIdentity` (`id`, `color`, `palette`, `shell`, `topper`, `emblem`) and is the only
 place provider strings are matched; the resolved identity travels on telemetry
-(`AgentTelemetry.identity`) so no component has to look a provider up at render time.
+(`AgentTelemetry.identity`) so no component has to look a provider up at render time. `palette`
+holds the four brand roles — `body`, `limb`, `accent`, `extra` — sampled from the provider's own
+logo, so a bot reads multi-colour instead of one flat hue; `color` stays the canonical hex for the
+HUD and is `palette.body` whenever the palette declares one.
 
 A provider whose logo the project does not know resolves to `default`: the shared body, the yellow
-antenna ball, and a stable hash-derived colour (`UNKNOWN_PROVIDER_COLORS`). Adding a provider is a
-data edit — one entry in the identity table plus any new shape rows — with no change to the rig.
+antenna ball, an empty palette `{}`, and a stable hash-derived colour (`UNKNOWN_PROVIDER_COLORS`)
+that the empty palette lets through. Adding a provider is a data edit — one entry in the identity
+table plus any new shape rows — with no change to the rig.
 
 Both bodies read the same tables. The procedural rig renders `RobotParts` (shared body) plus
 `RobotIdentityParts` (identity only); the `.glb` path already carries the baked shared body, so it
@@ -184,11 +188,11 @@ src/
 
 Generated assets and tooling:
 ```text
-public/models/worker-robot.glb       generated model (72 488 bytes, 30 parts, 2.365 m)
+public/models/worker-robot.glb       generated model (72 616 bytes, 30 parts, 2.365 m)
 public/models/worker-robot.meta.json build manifest (part count, bounds, tintable meshes)
 scripts/build-robot-model.mjs        `npm run build:model` — writes both files from robotModel.ts
 scripts/identity-rules.mjs           `npm run identity:test` — truth table for providerIdentity.ts
-scripts/identity-render.mjs          live-graph gate: shells, toppers, baked ball, pill clearance
+scripts/identity-render.mjs          live-graph gate: shells, toppers, baked ball, role colours, pill clearance
 scripts/status-rules.mjs             `npm run status:test` — truth table for statusResolution.ts
 scripts/explain-status.mjs           `npm run status:live` — shipping rules vs. the live database
 ```
@@ -269,7 +273,10 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   `DESK_SEAT`, offset by `-DESK_SEAT.y - bounds.min.y * scale` so its feet land on the floor.
   `DESK_SEAT` is applied exactly once (the first build applied it twice and floated).
 - **Per-agent colour.** `SkeletonUtils.clone` shares materials, so each clone's materials are
-  cloned before tinting `body` / `limb`; otherwise all four desks turn the same colour.
+  cloned before tinting all four roles — `body` (cranium, chest), `limb` (upper arms, thighs),
+  `accent` (bow tie, badge stripe) and `extra` (shins); otherwise all four desks turn the same
+  colour. `RECOLOR_ROLES` in `src/lib/robotModel.ts` is the one list both the build script and
+  `ModelRobot` read, and the generator fails if a part carries the wrong role after the round trip.
 - **Loading is imperative, not Suspense.** `useGLTF` suspends by throwing and then rethrows the
   rejection during render, and React 19 reports *every* caught render error to `window`, so a
   missing file could never pass a zero-page-error gate even with a boundary. `ModelRobot` calls
@@ -372,16 +379,20 @@ scripts/shot.mjs    navigates with ?capture=1 and captures a full or clipped scr
 scripts/probe.mjs   DOM/GL introspection
 scripts/build-robot-model.mjs  regenerates public/models/worker-robot.glb (+ meta) from robotModel.ts
 scripts/identity-rules.mjs     truth table for providerIdentity.ts (npm run identity:test)
-scripts/identity-render.mjs    live-graph render gate for the per-provider identity (26 assertions)
+scripts/identity-render.mjs    live-graph render gate for the per-provider identity (42 assertions)
 ```
 
 `identity-render.mjs` answers a question a screenshot cannot: *is a shell authored in the part
 tables actually mounted on the live three.js graph?* A colour swap looks identical in a PNG. It
-needs `?capture=1`, which is what makes `Scene` publish `window.__office` (scene, camera, and a
-`robots` getter) from the `SceneBridge` component. It asserts, per bot on stage: identity meshes are
-mounted, exactly one visible antenna ball survives and only for a `ball` identity, exactly one pulsing
-topper exists, the accent colour is the identity colour, and **the name pill's bottom edge clears the
-topmost identity vertex**. The pill check is a real regression guard — `<Html center>` used to drop
+imports the shipping tables and, for every part of every bot on stage, compares the mesh colour
+against the hex its declared role resolves to — so a part baked or mounted with the wrong role
+fails by name. It needs `?capture=1`, which is what makes `Scene` publish `window.__office` (scene,
+camera, and a `robots` getter) from the `SceneBridge` component. It asserts, per bot on stage:
+identity meshes are mounted, `hasModelRoot` matches the rig under test, exactly one visible antenna
+ball survives and only for a `ball` identity, exactly one pulsing topper exists, every part wears
+its role colour, and **the name pill's bottom edge clears the topmost identity vertex**. The
+`hasModelRoot` check is what proves the `.glb` gate is not silently measuring the procedural
+fallback. The pill check is a real regression guard — `<Html center>` used to drop
 half the pill (~27 px ≈ 0.19 m) back over the topper on three of four bots. The ball count guards the
 other duplicate-owner failure: it is what a `default` bot would trip if the baked `antennaBall` were
 left visible next to `AntennaTopper`'s own ball.
@@ -389,8 +400,8 @@ left visible next to `AntennaTopper`'s own ball.
 Run it on both bodies; the `.glb` path has its own plumbing (portals, hidden baked ball):
 
 ```bash
-node scripts/identity-render.mjs                                   # procedural
-TARGET_URL='http://localhost:3001/?capture=1&model=on' node scripts/identity-render.mjs
+npm run identity:render                                           # procedural
+npm run identity:render:model                                     # .glb rig
 ```
 
 `VIEW_W` / `VIEW_H` override the viewport; the gate is green at 1280x720, 1440x900, 1600x1000 and
