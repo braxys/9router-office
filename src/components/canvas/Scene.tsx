@@ -349,45 +349,65 @@ const REF_ASPECT = 1.1;
  *
  * The pill is a fixed-size DOM element — drei's `<Html>` has no `distanceFactor`
  * — so it does not shrink with the scene the way the desks do. Both numbers
- * follow from the camera pose and the desk layout; the layout gate asserts all
- * four pills stay inside the canvas, so a change to either surfaces at once.
+ * follow from the camera pose and the desk layout; the layout gate asserts
+ * every pill stays inside the canvas, so a change to either surfaces at once.
+ *
+ * The half-width must be the half-width of the *widest* pill, which is the
+ * widest status word, not the one the seeded roster happens to start in: the
+ * badges measure IDLE 128, THINKING 153, STREAMING 163 and ERROR 139 CSS px, so
+ * a roster that opens on IDLE would hide the STREAMING overflow. STREAMING is
+ * 163px, i.e. ~82px of half-width, plus a small safety margin for the em-based
+ * uppercase tracking and for whichever status word is longest next.
  */
 const RIGHT_PILL_FRAC = 0.903;
-const RIGHT_PILL_HALF_PX = 60;
+const RIGHT_PILL_HALF_PX = 90;
 
 /**
- * Keeps the office framed when the canvas is narrower than the design.
+ * Keeps the office framed on any canvas the HUD hands the scene.
  *
  * The camera's fov is vertical, so it is the *horizontal* field that shrinks
  * when the simulation panel takes 344px off the viewport: at 1024x900 the
  * canvas is 680x900, and a 38° vertical fov across that aspect crops the
  * right-most desk (Antigravity) off screen entirely. Widening the vertical fov
  * instead holds the horizontal field constant, so the whole office fits —
- * the scene reads as smaller rather than as cut off.
- *
- * That alone is enough down to a ~585px canvas. Below it the pills take over:
- * they keep their pixel width while the canvas shrinks around them, so on a
- * phone the right-most one overhangs the edge however the desks are framed.
- * There the field opens up by exactly the ratio that leaves the pill inside.
+ * the scene reads as smaller rather than as cut off. That constant-horizontal
+ * framing is enough for the *desks* at every size, but not for the pills: they
+ * keep their pixel width while the canvas shrinks around them, so the field
+ * also has to open up by whatever ratio leaves the right-most pill inside.
  *
  * Kept out of `CameraRig` on purpose: that effect is mount-only and owns the
  * intro flight, while this has to re-run on every canvas resize.
  */
 function fovForViewport(width: number, height: number) {
-  const aspect = width / height;
-  // At or above the reference aspect the baseline framing is already wide
-  // enough for every desk, so wide viewports stay byte-identical to before.
-  if (aspect >= REF_ASPECT) return BASE_FOV;
+  // The projection below divides by both, so a zero-sized or not-yet-measured
+  // canvas (`size` is 0x0 on the first frame, and a NaN would poison every
+  // later frame through `atan`) keeps the design framing instead of NaN.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return BASE_FOV;
+  }
 
+  const aspect = width / height;
   const refTan = Math.tan((BASE_FOV * Math.PI) / 360) * REF_ASPECT;
   // Widening the field by `k` pulls the pill towards the centre in proportion,
   // landing it at `0.5 + (RIGHT_PILL_FRAC - 0.5) / k`. It fits once that plus
-  // its half-width clears the edge; `k` of 1 means the constant-horizontal-fov
-  // framing already does, which is every canvas wider than ~585px.
+  // its half-width clears the edge; `k` of 1 means the framing already does.
   const room = 0.5 - RIGHT_PILL_HALF_PX / Math.max(width, RIGHT_PILL_HALF_PX * 2);
   const fit = room > 0 ? (RIGHT_PILL_FRAC - 0.5) / room : 1;
 
-  return (2 * Math.atan((refTan * Math.max(1, fit)) / aspect) * 180) / Math.PI;
+  // At or above the reference aspect the design fov is wide enough for every
+  // desk, but the pill still has to fit: a wide-but-short canvas (640x568)
+  // needs extra field even though its aspect is above the reference.
+  const baseTan =
+    aspect >= REF_ASPECT
+      ? Math.tan((BASE_FOV * Math.PI) / 360)
+      : refTan / aspect;
+
+  return (2 * Math.atan(baseTan * Math.max(1, fit)) * 180) / Math.PI;
+}
+
+/** Narrowing predicate: three marks the concrete camera type on the instance. */
+function isPerspectiveCamera(camera: THREE.Camera): camera is THREE.PerspectiveCamera {
+  return 'isPerspectiveCamera' in camera && camera.isPerspectiveCamera === true;
 }
 
 /**
@@ -397,15 +417,21 @@ function fovForViewport(width: number, height: number) {
  * see it is not mutating a value React owns.
  */
 function applyFov(camera: THREE.Camera, fov: number) {
-  const perspective = camera as THREE.PerspectiveCamera;
-  perspective.fov = fov;
-  perspective.updateProjectionMatrix();
+  // Only a perspective camera has an fov to write. `camera` is whatever the
+  // renderer was created with, so an orthographic one would silently accept a
+  // nonsense projection here.
+  if (!isPerspectiveCamera(camera)) return;
+  camera.fov = fov;
+  camera.updateProjectionMatrix();
 }
 
 function ResponsiveFov() {
   const { camera, size, invalidate } = useThree();
 
-  useEffect(() => {
+  // Layout effect, not a passive one: the Canvas mounts with `fov: 38` and the
+  // correction has to be in place for the *first* paint, or the scene pops as
+  // the framing snaps on the frame after. Cannot SSR — `Scene` is `ssr: false`.
+  useLayoutEffect(() => {
     applyFov(camera, fovForViewport(size.width, size.height));
     // `frameloop="demand"`: without this the new projection may never paint.
     invalidate();

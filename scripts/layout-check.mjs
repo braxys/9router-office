@@ -13,14 +13,20 @@
 //      bug), the four mood labels are never truncated, and the panel itself
 //      either fits its box or scrolls — the footer's controls (Pause / Reset /
 //      Sound / Model) are only reachable through that scroll;
-//   5. all provider rows are visible in the panel without scrolling;
+//   5. every provider row renders and is reachable on whichever surface is
+//      visible — in the panel without scrolling it, in the dock through the
+//      scroller its picker lives in;
 //   6. the dock never overlaps the top HUD and keeps its header on screen;
 //   7. all three camera presets are visible and enabled, and all four mood
 //      cells are reachable, on whichever surface is visible;
 //   8. the panel is exactly 320px wide at `lg`+, the width the camera framing
 //      is tuned against;
-//   9. all four robot name pills sit fully inside the canvas at every viewport,
+//   9. every robot name pill sits fully inside the canvas at every viewport,
 //      so the camera can never crop a desk out of frame.
+//
+// The expected roster size is not hardcoded: it comes from `AGENT_CONFIGS`,
+// the roster the app itself declares, and `/api/telemetry` is blocked so the
+// live 9Router database cannot swap in a different one. See EXPECTED_AGENTS.
 //
 // Usage: node scripts/layout-check.mjs        (npm run layout:test)
 //   CDP_PORT=9224            CDP port of the headless Chrome
@@ -30,6 +36,30 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const PORT = Number(process.env.CDP_PORT ?? 9224);
 const URL = process.env.TARGET_URL ?? 'http://localhost:3001/?capture=1';
+
+/**
+ * The roster size every surface must render, taken from the roster the app
+ * itself declares instead of a literal: a hardcoded 4 made this gate depend on
+ * whatever the developer's local 9Router database happened to contain, and the
+ * live database here has 3 agents, so it went 15/15 red.
+ *
+ * Node 24 strips the TypeScript natively. `agents.ts` only *type*-imports
+ * `./types`, so nothing outside the file is resolved and no path alias is
+ * needed. If stripping ever stops working this throws at load time — a loud
+ * failure, never a silent pass.
+ *
+ * Imported dynamically so the `MODULE_TYPELESS_PACKAGE_JSON` warning Node emits
+ * for a `.ts` file in a typeless package can be filtered: it is pure noise
+ * here, `package.json` is out of scope, and every other warning is re-emitted.
+ */
+const priorWarningListeners = process.listeners('warning');
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (warning.code === 'MODULE_TYPELESS_PACKAGE_JSON') return;
+  for (const listener of priorWarningListeners) listener(warning);
+});
+const { AGENT_CONFIGS } = await import('../src/lib/agents.ts');
+const EXPECTED_AGENTS = AGENT_CONFIGS.length;
 
 /** Tailwind `lg`: the side panel takes over from here, the dock below it. */
 const LG = 1024;
@@ -108,6 +138,19 @@ function send(method, params = {}) {
 await send('Emulation.setEmulatedMedia', {
   features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
 });
+
+/**
+ * Pin the roster. `TelemetryBridge` polls `/api/telemetry` and, on the first
+ * success, hands the live 9Router snapshot to the store — so without this the
+ * scene renders however many agents the *local database* has (3 here) and this
+ * gate measures the developer's data instead of the app. Blocking the request
+ * leaves `simulationMode` on and the store on its seeded roster
+ * (`buildInitialAgents()` -> `AGENT_CONFIGS`), which is what EXPECTED_AGENTS
+ * counts. `Network.setBlockedURLs` is scoped to this page/session and survives
+ * `Page.navigate`, so enabling it here is enough.
+ */
+await send('Network.enable');
+await send('Network.setBlockedURLs', { urls: ['*api/telemetry*'] });
 
 await send('Page.navigate', { url: URL });
 await delay(3000);
@@ -303,21 +346,31 @@ const probe = `(() => {
     };
   });
 
-  // Provider rows: every row must be visible in the panel without scrolling
-  // it, so this uses the strict test — the panel itself must not need to
-  // scroll to reveal a provider (the old max-h-[104px] bug).
+  // Provider rows on whichever surface is on screen. The panel must show every
+  // row without scrolling (the old max-h-[104px] bug), so that path keeps the
+  // strict test; the dock's picker lives inside the toy-scroll pane and is
+  // reached by scrolling it, exactly like the mood cells there.
   const panelBox = panelVisible ? rect(panel) : null;
-  const providerSection = panelVisible ? panel.querySelector('section[aria-label="Pilih provider"]') : null;
+  const providerSection = surface
+    ? surface.querySelector('section[aria-label="Pilih provider"]')
+    : null;
+  // Strict means "visible right now, no scrolling". The panel owns that
+  // promise; the dock's picker is only promised to be reachable through the
+  // scroller it sits in, so it gets the scroll-tolerant path.
+  const providersStrict = panelVisible;
   const providers = providerSection
     ? [...providerSection.querySelectorAll('button')].map((row) => {
-        const reach = reachable(row, true);
+        const reach = reachable(row, providersStrict);
         const r = rect(row);
+        // Only the panel promises "visible without scrolling it"; the dock's
+        // contract is that the row is reachable through its own scroller.
         const inPanel =
-          !!panelBox &&
-          r.top >= panelBox.top - TOL &&
-          r.bottom <= panelBox.bottom + TOL &&
-          r.left >= panelBox.left - TOL &&
-          r.right <= panelBox.right + TOL;
+          !panelVisible ||
+          (!!panelBox &&
+            r.top >= panelBox.top - TOL &&
+            r.bottom <= panelBox.bottom + TOL &&
+            r.left >= panelBox.left - TOL &&
+            r.right <= panelBox.right + TOL);
         return { name: text(row).slice(0, 18), rect: r, inPanel, reach };
       })
     : [];
@@ -412,6 +465,7 @@ const probe = `(() => {
     surface: surfaceName,
     panelClipping: panelVisible ? scanClipping(panel) : { vertical: [], horizontal: [] },
     dockOverflow: [...new Set(dockOverflow)],
+    providerPicker: !!providerSection,
     providers,
     mood,
     cameras,
@@ -552,19 +606,26 @@ for (const { w, h } of VIEWPORTS) {
     }
   }
 
-  // 5. Every provider row visible in the panel without scrolling it.
-  if (d.panel) {
-    if (d.providers.length < 4) {
-      problems.push(`PROVIDERS only ${d.providers.length} rows rendered (expected 4)`);
-    }
-    for (const row of d.providers) {
-      if (!row.reach.ok) {
-        problems.push(`PROVIDER HIDDEN "${row.name}" ${describeReach(row.reach)}`);
-      } else if (!row.inPanel) {
-        problems.push(
-          `PROVIDER OUTSIDE PANEL "${row.name}" y${row.rect.top}-${row.rect.bottom} vs panel y${d.panel.top}-${d.panel.bottom}`,
-        );
-      }
+  // 5. Every provider row rendered, and reachable on whichever surface is on
+  // screen. The count is the roster the app declares (exact — the live feed is
+  // blocked, so both surfaces map over the same pinned roster), so a surface
+  // that drops rows fails here instead of only when a human notices, and the
+  // picker being deleted outright shows up as a missing section, never as a
+  // skipped check.
+  if (!d.providerPicker) {
+    problems.push(`PROVIDER PICKER missing on the ${d.surface}`);
+  } else if (d.providers.length !== EXPECTED_AGENTS) {
+    problems.push(
+      `PROVIDERS ${d.providers.length} rows rendered (expected ${EXPECTED_AGENTS})`,
+    );
+  }
+  for (const row of d.providers) {
+    if (!row.reach.ok) {
+      problems.push(`PROVIDER HIDDEN "${row.name}" ${describeReach(row.reach)}`);
+    } else if (!row.inPanel) {
+      problems.push(
+        `PROVIDER OUTSIDE PANEL "${row.name}" y${row.rect.top}-${row.rect.bottom} vs panel y${d.panel.top}-${d.panel.bottom}`,
+      );
     }
   }
 
@@ -575,32 +636,41 @@ for (const { w, h } of VIEWPORTS) {
     problems.push(`PANEL WIDTH ${d.panel.w} expected ${PANEL_W}`);
   }
 
-  // 5c. All four robots framed. The pills are plain DOM positioned by the live
+  // 5c. Every robot framed. The pills are plain DOM positioned by the live
   // projection, so this is the only assertion that can see the camera crop the
   // office: at 1024x900 a fixed vertical fov pushed Antigravity off the right
-  // edge while every other check stayed green. Non-vacuous by construction — a
-  // missing canvas or a missing pill is a failure, never a skipped check.
+  // edge while every other check stayed green. Non-vacuous by construction —
+  // a missing canvas, a missing picker or a short roster is a failure, never a
+  // skipped check.
+  //
+  // The count is exact, not a floor: with the live feed blocked the roster is
+  // pinned to `AGENT_CONFIGS`, so a surface rendering fewer pills dropped a
+  // robot and one rendering more is a duplicate portal — both defects. The
+  // loop below still runs on a mismatch so a short roster also reports which
+  // pill escaped, and `pills.length === 0` fails on the count alone.
   if (!d.canvas) {
     problems.push('CANVAS not found — robot framing cannot be measured');
-  } else if (d.pills.length !== 4) {
-    problems.push(`ROBOT PILLS expected 4, found ${d.pills.length}`);
-  } else {
-    for (const pill of d.pills) {
-      const r = pill.rect;
-      const c = d.canvas;
-      if (!pill.drawn) {
-        problems.push(`ROBOT PILL NOT DRAWN "${pill.name}" (0x0 box — robot behind the camera)`);
-      } else if (
-        r.left < c.left - 1 ||
-        r.right > c.right + 1 ||
-        r.top < c.top - 1 ||
-        r.bottom > c.bottom + 1
-      ) {
-        problems.push(
-          `ROBOT PILL OUTSIDE CANVAS "${pill.name}" x${r.left}-${r.right} y${r.top}-${r.bottom} ` +
-            `vs canvas x${c.left}-${c.right} y${c.top}-${c.bottom}`,
-        );
-      }
+  } else if (d.pills.length !== EXPECTED_AGENTS) {
+    problems.push(
+      `ROBOT PILLS expected ${EXPECTED_AGENTS}, found ${d.pills.length}`,
+    );
+  }
+  for (const pill of d.pills) {
+    const r = pill.rect;
+    const c = d.canvas;
+    if (!c) break;
+    if (!pill.drawn) {
+      problems.push(`ROBOT PILL NOT DRAWN "${pill.name}" (0x0 box — robot behind the camera)`);
+    } else if (
+      r.left < c.left - 1 ||
+      r.right > c.right + 1 ||
+      r.top < c.top - 1 ||
+      r.bottom > c.bottom + 1
+    ) {
+      problems.push(
+        `ROBOT PILL OUTSIDE CANVAS "${pill.name}" x${r.left}-${r.right} y${r.top}-${r.bottom} ` +
+          `vs canvas x${c.left}-${c.right} y${c.top}-${c.bottom}`,
+      );
     }
   }
 
@@ -677,7 +747,6 @@ for (const { w, h } of VIEWPORTS) {
           p.rect.bottom <= d.canvas.bottom + 1,
       ).length
     : 0;
-
   console.log(
     `${ok ? 'PASS' : 'FAIL'} ${String(d.vw).padStart(4)}x${String(d.vh).padEnd(4)} ` +
       `${surfaceText} cards=${d.panels.length} hudHits=${hudHits} ` +
@@ -685,7 +754,8 @@ for (const { w, h } of VIEWPORTS) {
       `vclip=${d.panelClipping.vertical.length} hclip=${d.panelClipping.horizontal.length} ` +
       `dockOverflow=${d.dockOverflow.length} ` +
       `panelW=${d.panel ? d.panel.w : 'off'} ` +
-      `pills=${pillsOk}/${d.pills.length}${d.canvas ? '' : ' (no canvas)'}`,
+      `pills=${pillsOk}/${d.pills.length}${d.canvas ? '' : ' (no canvas)'}` +
+      ` roster=${EXPECTED_AGENTS}`,
   );
   for (const k of known) console.log(`       KNOWN ${k}`);
   for (const p of problems) console.log(`       ${p}`);
