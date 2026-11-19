@@ -497,8 +497,12 @@ const PALETTE_GRID = {
   ollama: { body: '#9AA7B4', limb: '#111111', accent: '#111111', extra: '#111111' },
 };
 
-for (const [id, expected] of Object.entries(PALETTE_GRID)) {
-  check(`${id} palette is the brand grid`, IDENTITIES[id].palette, expected);
+// Iterate the identities, not the grid: the grid is a literal copy that a future
+// provider will not automatically extend, and looping over it would silently stop
+// covering every row added after today. A missing row must surface as a FAIL
+// (`expected: undefined`), not a TypeError that kills the rest of the run.
+for (const id of Object.keys(IDENTITIES).filter((key) => key !== 'default')) {
+  check(`${id} palette is the brand grid`, IDENTITIES[id]?.palette, PALETTE_GRID[id]);
 }
 
 /* -------------------------------------------------------------------------- */
