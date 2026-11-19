@@ -19,10 +19,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 import {
-  EMBLEMS,
   ROBOT_PARTS,
-  SHELLS,
-  TOPPERS,
+  identityPartsFor,
   resolveRobotColor,
 } from '../src/lib/robotModel.ts';
 import { IDENTITIES } from '../src/lib/providerIdentity.ts';
@@ -60,12 +58,9 @@ function check(label, actual, expected) {
 /** Every part this identity should be wearing, with the hex its role resolves to. */
 function expectedParts(identityId, accentColor) {
   const identity = IDENTITIES[identityId];
-  const parts = [
-    ...ROBOT_PARTS,
-    ...SHELLS[identity.shell],
-    ...TOPPERS[identity.topper],
-    ...EMBLEMS[identity.emblem],
-  ];
+  // `identityPartsFor` is the same three spreads the render path uses, so a new
+  // part group added there is colour-checked here without touching this gate.
+  const parts = [...ROBOT_PARTS, ...identityPartsFor(identity)];
   return parts.map((part) => ({
     name: part.id,
     color: resolveRobotColor(part.color, accentColor, identity.palette).toLowerCase(),
@@ -362,21 +357,35 @@ for (const robot of report) {
   }
 
   const expected = expectedParts(robot.identity, robot.accentColor);
-  const actual = new Map(robot.meshes.map((mesh) => [mesh.name, mesh.color]));
+  const actual = new Map();
+  for (const mesh of robot.meshes) {
+    const list = actual.get(mesh.name) ?? [];
+    list.push(mesh.color);
+    actual.set(mesh.name, list);
+  }
+
   const missing = [];
   const wrong = [];
+  const duplicated = [];
   for (const part of expected) {
-    // A mesh with no `color` reads as `null` from the bridge, so `undefined` is
-    // not the only "not wearing this role" case — guard both or the loop throws.
     const got = actual.get(part.name);
-    if (got === undefined || got === null) missing.push(part.name);
-    else if (got.toLowerCase() !== part.color) wrong.push(`${part.name}: ${got} != ${part.color}`);
+    // A mesh with no `color` reads as `null` from the bridge, so `undefined` is not
+    // the only "not wearing this role" case — guard both or the loop throws.
+    if (got === undefined || got[0] === null || got[0] === undefined) {
+      missing.push(part.name);
+      continue;
+    }
+    // Two meshes sharing a part id means a doubled mount: the old Map kept only the
+    // last colour, so a duplicate with a different colour could pass on traversal
+    // order alone. One occurrence is the only correct count.
+    if (got.length > 1) duplicated.push(`${part.name} x${got.length}`);
+    else if (got[0].toLowerCase() !== part.color) wrong.push(`${part.name}: ${got[0]} != ${part.color}`);
   }
 
   check(
     `${robot.name} [${robot.identity}] every part wears its role colour`,
-    { missing, wrong },
-    { missing: [], wrong: [] },
+    { missing, wrong, duplicated },
+    { missing: [], wrong: [], duplicated: [] },
   );
   check(
     `${robot.name} [${robot.identity}] has enough parts to prove the mapping`,
