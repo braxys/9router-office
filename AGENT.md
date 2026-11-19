@@ -73,9 +73,11 @@ that the robots send parcels to.
 - **The Zustand store (`src/store/useAgentStore.ts`) is the source of truth.** Simulation
   behaviour must not change; the only sanctioned extension is the additive
   `applyLiveTelemetry(agents)` action used by the telemetry bridge.
-- **Presentation state lives in `src/store/useUiStore.ts`, never in `useAgentStore`.** Sound and
-  model preferences must not look like telemetry updates. That store always starts at the
-  defaults and applies `localStorage` after mount, so nothing reads storage during render.
+- **Presentation state lives in `src/store/useUiStore.ts`, never in `useAgentStore`.** Sound,
+  the model file choice, and whether the simulation side panel is collapsed into its rail must not
+  look like telemetry updates. That store always starts at the defaults and applies `localStorage`
+  after mount, so nothing reads storage during render. The collapsed state is session-only, and the
+  rail width / footprint it feeds the camera live in `src/lib/hudLayout.ts`.
 - **Simulation Mode must keep working exactly as before:** manual status triggers, broadcast to
   all, cycle, reset, and the automatic mock telemetry tick.
 - **Mode ownership:** manual triggers and `Reset` claim Simulation Mode first, and

@@ -267,7 +267,11 @@ export function TacticalOverlay() {
       </div>
 
       {/* ---------------- top-right: office vitals ---------------- */}
-      <div className="pointer-events-none absolute top-4 right-4 z-20 sm:top-5 sm:right-5">
+      {/* `--hud-right-offset` is set by `CommandCenter`: footprint + gutter
+          (356px with the panel open, 92px with the rail), which clears the
+          panel wrapper rather than the card, so the card keeps its existing
+          24px gap from the panel edge in both states. */}
+      <div className="pointer-events-none absolute top-4 right-4 z-20 sm:top-5 sm:right-5 lg:right-[var(--hud-right-offset)]">
         <div className="toy-card px-3 py-2.5">
           <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-extrabold tracking-wide text-ink-dim uppercase">
             <Gauge className="h-3 w-3" strokeWidth={2.6} aria-hidden />

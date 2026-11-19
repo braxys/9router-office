@@ -327,3 +327,9 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
 1920x1080), `npx tsc --noEmit` → 0, `npx eslint` → 0, `npm run smoke` → clean, `npm run layout:test`
 → 15/15 with `pills=4/4` at every viewport, `npm run build:model` → 30 parts / 2.365 m with
 `git diff public/models/` empty, `npm run build` → clean.
+
+## Phase 5.2: Collapsible Side Panel
+
+- The right panel folds into a 56px rail with a single logo button (useUiStore.panelCollapsed, session-only, never persisted). Unfolding restores the same 320px panel with the same sections; the new header row owns the toggle and mirrors aria-expanded.
+- Geometry stays in src/lib/hudLayout.ts: PANEL_RAIL_WIDTH / PANEL_RAIL_FOOTPRINT and visibleSceneWidth(canvasWidth, collapsed), so the camera gives the office the released width back instead of leaving a hole. CommandCenter publishes --hud-right-offset and Office Vitals follows the panel/rail edge.
+- Verification: npm run layout:unit 16/16, npm run layout:test 15/15, npx tsc --noEmit 0, npx eslint 0 errors, npm run smoke exit 0, npm run build clean, plus a 1440x900 probe measuring 320 -> 56 -> 320 with the vitals gap unchanged.

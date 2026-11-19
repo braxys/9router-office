@@ -1,11 +1,14 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import type { CSSProperties } from 'react';
 import { ControlDock } from '@/components/hud/ControlDock';
 import { RobotSpotlightCard, TacticalOverlay } from '@/components/hud/TacticalOverlay';
 import { SimulationPanel } from '@/components/hud/SimulationPanel';
 import { TelemetryBridge } from '@/components/hud/TelemetryBridge';
 import { useMoodShortcuts } from '@/components/hud/useMoodShortcuts';
+import { PANEL_FOOTPRINT, PANEL_GUTTER, PANEL_RAIL_FOOTPRINT } from '@/lib/hudLayout';
+import { useUiStore } from '@/store/useUiStore';
 
 /**
  * WebGL must never render on the server, so the whole R3F canvas is a
@@ -43,12 +46,44 @@ export function CommandCenter() {
   // trigger of a hidden copy and leave the visible panel without feedback.
   useMoodShortcuts();
 
+  const panelCollapsed = useUiStore((s) => s.panelCollapsed);
+
   return (
-    <main className="flex h-dvh w-full overflow-hidden bg-office-sky">
+    <main
+      className="relative flex h-dvh w-full overflow-hidden bg-office-sky"
+      style={
+        {
+          // One source for "where the HUD's right edge starts": the panel
+          // footprint plus its gutter, or the rail's when the panel is folded.
+          // `TacticalOverlay` reads it through a Tailwind arbitrary property, so
+          // the number never gets copied into a second literal.
+          '--hud-right-offset': `${
+            (panelCollapsed ? PANEL_RAIL_FOOTPRINT : PANEL_FOOTPRINT) + PANEL_GUTTER
+          }px`,
+        } as CSSProperties
+      }
+    >
       {/* live 9Router polling + simulation fallback */}
       <TelemetryBridge />
 
-      <div className="relative min-w-0 flex-1">
+      {/*
+        The scene is full-bleed: the canvas covers the entire viewport and the
+        simulation panel floats on top of it (see the panel column below).
+
+        It used to be a flex sibling of the panel column, so the canvas stopped
+        at the column edge and everything the panel column occupies — its 12px
+        gutter, its 32px right margin and the whole area *below* the panel,
+        which is a short card in a full-height column — was painted by `main`'s
+        `bg-office-sky`. That read as a hard blue band where the office floor
+        and wall should continue, and cut the wall artwork off at the column
+        edge. Full-bleed is what makes the diorama read as one room.
+
+        Consequence: the camera now sees ~344px more width than the visible
+        (unoccluded) area, so `Scene`'s framing is tuned against the *visible*
+        box rather than the canvas box — see `fovForViewport` and the
+        `visibleWidth` it is fed.
+      */}
+      <div className="absolute inset-0">
         {/* 3D viewport */}
         <div className="absolute inset-0">
           <Scene />
@@ -90,9 +125,13 @@ export function CommandCenter() {
         </p>
       </div>
 
-      {/* simulation controls: the side panel owns every control from `lg` up */}
-      <div className="hidden shrink-0 p-3 lg:block">
-        <SimulationPanel />
+      {/* simulation controls: the side panel owns every control from `lg` up.
+          Absolutely positioned over the full-bleed scene (never a flex
+          sibling), so the floor and wall keep running underneath it. */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-40 hidden p-3 lg:block">
+        <div className="pointer-events-auto">
+          <SimulationPanel />
+        </div>
       </div>
     </main>
   );

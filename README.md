@@ -32,6 +32,7 @@ npm run typecheck     # tsc --noEmit
 npm run lint          # eslint
 npm run identity:test # provider identity truth table (no browser)
 npm run status:test   # provider status truth table (no browser)
+npm run layout:unit   # HUD geometry truth table, incl. the collapsed rail (no browser)
 npm run build:model   # regenerate public/models/worker-robot.glb from robotModel.ts
 npm run smoke         # page-ready + console-error probe (needs Chrome on CDP 9223)
 npm run layout:test   # 15-viewport HUD layout gate (needs dev server + Chrome on CDP 9224)

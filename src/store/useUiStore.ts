@@ -4,7 +4,8 @@ import { create } from 'zustand';
 import type { AgentStatus } from '@/lib/types';
 
 /**
- * Presentation-only preferences: sound and the opt-in `.glb` model.
+ * Presentation-only preferences: sound, the opt-in `.glb` model, and whether the
+ * simulation side panel is collapsed into its rail.
  *
  * Deliberately NOT part of `useAgentStore`. That store is the telemetry source
  * of truth and `AGENT.md` §6 forbids putting presentation state in it — a
@@ -41,6 +42,15 @@ interface UiStore extends UiPrefs {
    * a 1..4 keypress must light up the grid that is actually on screen.
    */
   flash: AgentStatus | null;
+  /**
+   * Whether the simulation side panel is folded into its logo rail.
+   *
+   * Presentation only, and deliberately not persisted: the panel starts open so
+   * the server render and the first client render agree, and so `layout-check`
+   * keeps measuring the 320px panel it asserts.
+   */
+  panelCollapsed: boolean;
+  togglePanelCollapsed: () => void;
   setFlash: (status: AgentStatus | null) => void;
   /**
    * agentId -> the exact `lastError` text the user closed.
@@ -100,6 +110,9 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   modelError: null,
   dismissedErrors: {},
   flash: null,
+  panelCollapsed: false,
+
+  togglePanelCollapsed: () => set((state) => ({ panelCollapsed: !state.panelCollapsed })),
 
   setFlash: (status) => set({ flash: status }),
 
