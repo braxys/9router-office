@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { createPortal, useFrame } from '@react-three/fiber';
 import { GLTFLoader } from 'three-stdlib';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import type { AgentStatus } from '@/lib/types';
+import type { ResolvedIdentity } from '@/lib/providerIdentity';
 import { ROBOT_HEIGHT, darkenHex } from '@/lib/robotModel';
 import { useUiStore } from '@/store/useUiStore';
+import { AntennaTopper, RobotIdentityParts } from './RobotParts';
 import { RobotEffects } from './RobotEffects';
 import { DESK_SEAT } from './WorkDesk';
 
@@ -69,6 +71,8 @@ export interface ModelRobotProps {
   url: string;
   /** The agent's accent colour; tints the `body` and `limb` parts. */
   accentColor: string;
+  /** Which provider bot this is: its shell, topper and emblem. */
+  identity: ResolvedIdentity;
   /** Current status, for the shared per-status props. */
   status: AgentStatus;
   /** Unit direction (root-local) toward the central hub. */
@@ -141,6 +145,7 @@ export function ModelRobot({ url, fallback, ...rest }: ModelRobotProps) {
 function LoadedModelRobot({
   scene,
   accentColor,
+  identity,
   status,
   towardHub,
   tokensPerSecond,
@@ -196,41 +201,52 @@ function LoadedModelRobot({
       else apply(mesh.material as THREE.Material);
     });
 
+    // The neutral `.glb` bakes the yellow antenna ball. Any provider topper
+    // replaces it, so hide the baked one rather than stacking a shell on a ball.
+    if (identity.topper !== 'ball') {
+      const ball = copy.getObjectByName('antennaBall');
+      if (ball) ball.visible = false;
+    }
+
     return copy;
-  }, [scene, accentColor]);
+  }, [scene, accentColor, identity]);
 
   // The joints are looked up once per clone. The `.glb` stores them under the
   // same names the spec uses (`ROBOT_NODES`), which is what lets the animation
   // below be the same performance for either body.
   //
-  // Held in a ref, not a memo: `useFrame` mutates these objects every frame, and
-  // React 19 forbids touching render-scoped values after render completes.
-  const joints = useRef<{
-    torso: THREE.Object3D | null;
-    head: THREE.Object3D | null;
-    antenna: THREE.Object3D | null;
-    armL: THREE.Object3D | null;
-    armR: THREE.Object3D | null;
-  }>({ torso: null, head: null, antenna: null, armL: null, armR: null });
-
-  // Rest poses, so every frame rotates around the spec's pivot instead of
-  // accumulating offsets.
-  const rest = useRef({ headY: 0, antennaZ: 0 });
-
-  useEffect(() => {
-    const j = {
+  // A memo rather than a ref: the identity portals below need a container object
+  // *during render*, and these objects are stable for as long as `instance` is.
+  // `useFrame` reads them directly and mutates their properties — that is the
+  // animation, not React state.
+  const joints = useMemo(
+    () => ({
       torso: instance.getObjectByName('torso') ?? null,
       head: instance.getObjectByName('head') ?? null,
       antenna: instance.getObjectByName('antenna') ?? null,
       armL: instance.getObjectByName('armL') ?? null,
       armR: instance.getObjectByName('armR') ?? null,
-    };
-    joints.current = j;
-    rest.current = {
-      headY: j.head?.position.y ?? 0,
-      antennaZ: j.antenna?.rotation.z ?? 0,
-    };
-  }, [instance]);
+    }),
+    [instance],
+  );
+
+  // Rest poses, so every frame rotates around the spec's pivot instead of
+  // accumulating offsets.
+  const rest = useMemo(
+    () => ({
+      headY: joints.head?.position.y ?? 0,
+      antennaZ: joints.antenna?.rotation.z ?? 0,
+    }),
+    [joints],
+  );
+
+  // The animation channel. `joints` is a render value (the portals need it
+  // during render), and React forbids mutating those after render — so the
+  // frame loop goes through a ref that always points at the current joints.
+  const animated = useRef(joints);
+  useEffect(() => {
+    animated.current = joints;
+  }, [joints]);
 
   const isError = status === 'ERROR';
   const isThinking = status === 'THINKING';
@@ -243,7 +259,7 @@ function LoadedModelRobot({
     const dt = Math.min(delta, 0.05);
     const t = (anim.current.time += dt);
     const a = anim.current;
-    const j = joints.current;
+    const j = animated.current;
 
     a.lean = spring(a.lean, isThinking ? 1 : isStreaming ? 0.35 : 0, dt, 7);
     a.tilt = spring(a.tilt, isError ? 1 : 0, dt, 6);
@@ -264,12 +280,12 @@ function LoadedModelRobot({
       j.head.rotation.z = isError ? Math.PI / 4 : a.tilt * 0.12;
       j.head.rotation.x = a.lean * 0.16 + (isThinking ? 0.1 : 0);
       j.head.position.y =
-        rest.current.headY + (isError ? 0 : Math.sin(t * 2.1) * 0.014) + a.lean * 0.02;
+        rest.headY + (isError ? 0 : Math.sin(t * 2.1) * 0.014) + a.lean * 0.02;
     }
 
     if (j.antenna) {
       const wobble = isError ? 0.5 : isThinking ? 0.2 : 0.09;
-      j.antenna.rotation.z = rest.current.antennaZ + Math.sin(t * (isError ? 9 : 2.3)) * wobble;
+      j.antenna.rotation.z = rest.antennaZ + Math.sin(t * (isError ? 9 : 2.3)) * wobble;
       j.antenna.rotation.x = Math.cos(t * (isError ? 7 : 1.7)) * wobble * 0.7;
     }
 
@@ -295,6 +311,23 @@ function LoadedModelRobot({
     // aligned inside this group, so `DESK_SEAT` is applied exactly once.
     <group position={[DESK_SEAT.x, DESK_SEAT.y, DESK_SEAT.z]}>
       <primitive object={instance} />
+      {/* Identity parts are mounted onto the model's own joints, not at root:
+          a shell has to follow the head when it looks around, tilts on ERROR,
+          and the antenna wobbles. `RobotIdentityParts`, not `RobotParts`: the
+          `.glb` already carries the baked shared body, so adding it again would
+          double every block. */}
+      {joints.head &&
+        createPortal(
+          <RobotIdentityParts node="head" identity={identity} accent={identity.color} />,
+          joints.head,
+        )}
+      {joints.antenna &&
+        createPortal(<AntennaTopper identity={identity} status={status} />, joints.antenna)}
+      {joints.torso &&
+        createPortal(
+          <RobotIdentityParts node="torso" identity={identity} accent={identity.color} />,
+          joints.torso,
+        )}
       {/* The comedy belongs to the performance, not the body: the same props
           render for the procedural robot and the model. */}
       <RobotEffects
