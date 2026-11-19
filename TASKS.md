@@ -138,8 +138,9 @@ gap (there is no latency column).
   `pace = 1 + min(1.5, tokensPerSecond / 90)`. Travel/rotation advance through refs
   (`travel`, `clock`) instead of `state.clock`, so pausing the stream does not make the
   parcels jump when it resumes.
-- Badges: drei `<Html>` at `[0, 2.45, -0.3]`, `center`, `pointerEvents="none"` and **no**
-  `distanceFactor` — that keeps a constant CSS size, so the pill stays legible in the
+- Badges: drei `<Html>` at the derived `[0, PILL_Y, PILL_Z]`, no `center` (the wrapper shifts
+  itself up by its own height so the pill's bottom edge sits on the anchor), `pointerEvents="none"`
+  and **no** `distanceFactor` — that keeps a constant CSS size, so the pill stays legible in the
   overview and does not balloon in a focus shot. The hub label plate moved to `y = 5.0`
   so the two never overlap in the default framing.
 - Camera: `src/lib/cameraBus.ts` is a DOM-level pub/sub (`requestCamera(preset)`), keeping
@@ -292,7 +293,7 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
       `antenna` joints so they follow the performance; baked `antennaBall` hidden when replaced.
 - [x] `Scene.tsx` — identity selector + threading, derived `PILL_Y` / `PILL_Z`, and the
       `?capture=1` `SceneBridge` that publishes `window.__office` for the render gate.
-- [x] `scripts/identity-rules.mjs` (551 assertions) and `scripts/identity-render.mjs` (26 live-graph
+- [x] `scripts/identity-rules.mjs` (569 assertions) and `scripts/identity-render.mjs` (26 live-graph
       assertions, run on both bodies).
 
 ### Phase 5 notes
@@ -310,8 +311,9 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
   the wrapper bottom-centre and moving the pill into the antenna's plane; clearance is now 5–9 px at
   every tested viewport.
 - **Envelope ≠ body height.** `ROBOT_HEIGHT` (2.365 m) is what the `.glb` build asserts; the pill
-  rides `ROBOT_ENVELOPE_TOP` (2.49 m at rest) plus `TOPPER_ANIMATION_LIFT` (0.05 m), measured as the
-  worst animated topper peak over 6 s of live idle (2.537 m). A taller topper lifts the pill itself.
+  rides `ROBOT_ENVELOPE_TOP` (2.09 m above the seat at rest, `ROBOT_ENVELOPE_HEIGHT` 2.49 m measured
+  from the floor) plus `TOPPER_ANIMATION_LIFT` (0.05 m), measured as the worst animated topper peak
+  over 6 s of live idle (2.537 m). A taller topper lifts the pill itself.
 - **Two suspected defects were measured and dismissed.** The arch topper's legs clear the cranium by
   28 cm — what looks like intersection is `shellArchPost`, the head crest, which is meant to hug it.
   The chest emblem is not occluded by desk or keyboard (camera→emblem ray hits no furniture) and
@@ -320,7 +322,7 @@ topper, a chest emblem and the brand colour. Unknown providers keep the original
   `useFrame` mutates them, so `ModelRobot` keeps the joints in a `useMemo` and animates through a ref
   that always points at the current set.
 
-**Phase 5 verification:** `npm run identity:test` → 551/551, `node scripts/identity-render.mjs` →
+**Phase 5 verification:** `npm run identity:test` → 569/569, `node scripts/identity-render.mjs` →
 26/26 on both the procedural and `?model=on` bodies (green at 1280x720, 1440x900, 1600x1000 and
 1920x1080), `npx tsc --noEmit` → 0, `npx eslint` → 0, `npm run smoke` → clean, `npm run layout:test`
 → 15/15 with `pills=4/4` at every viewport, `npm run build:model` → 30 parts / 2.365 m with

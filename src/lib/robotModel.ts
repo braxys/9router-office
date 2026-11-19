@@ -611,7 +611,7 @@ export const SHELLS: Record<ShellId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.18, 0.26, 0.52],
       position: [-0.1, 0.41, 0],
-      color: 'accent2',
+      color: 'body',
     },
     {
       id: 'shellPixel3',
@@ -923,7 +923,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.07, 0.07, 0.06],
       position: [0, 0.38, 0.01],
-      color: 'accent2',
+      color: 'cream',
     },
   ],
 
@@ -1171,7 +1171,7 @@ export const TOPPERS: Record<TopperId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.07, 0.05, 0.06],
       position: [0, 0.285, 0.02],
-      color: 'accent2',
+      color: 'cream',
     },
   ],
 };
@@ -1397,7 +1397,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.07, 0.07, 0.012],
       position: [0, 0.4, 0.268],
-      color: 'accent2',
+      color: 'cream',
       unlit: true,
     },
   ],
@@ -1666,7 +1666,7 @@ export const EMBLEMS: Record<EmblemId, readonly RobotPart[]> = {
       shape: 'box',
       size: [0.07, 0.05, 0.012],
       position: [0, 0.305, 0.267],
-      color: 'accent2',
+      color: 'cream',
       unlit: true,
     },
   ],
@@ -1691,11 +1691,6 @@ export function identityPartsFor(identity: IdentityShape): readonly RobotPart[] 
     ...TOPPERS[identity.topper],
     ...EMBLEMS[identity.emblem],
   ];
-}
-
-/** The whole robot for one identity: the shared body plus what makes it *that* bot. */
-export function robotPartsFor(identity: IdentityShape): readonly RobotPart[] {
-  return [...ROBOT_PARTS, ...identityPartsFor(identity)];
 }
 
 /* -------------------------------------------------------------------------- */

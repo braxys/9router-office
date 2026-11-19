@@ -95,7 +95,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
     shell: 'cat',
     topper: 'catface',
     emblem: 'catface',
-    aliases: ['codebuddy', 'codebuddy-intl', 'code-buddy'],
+    aliases: ['codebuddy', 'codebuddy-intl'],
   },
   antigravity: {
     id: 'antigravity',
@@ -132,7 +132,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
     shell: 'pixel',
     topper: 'pixelK',
     emblem: 'pixelK',
-    aliases: ['kilocode', 'kilo-code', 'kilo'],
+    aliases: ['kilocode', 'kilo'],
   },
   nvidia: {
     id: 'nvidia',
@@ -153,7 +153,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
     shell: 'manga',
     topper: 'nfringe',
     emblem: 'nfringe',
-    aliases: ['nous', 'nous-research', 'nousresearch'],
+    aliases: ['nous', 'nous-research'],
   },
   opencode: {
     id: 'opencode',
@@ -162,7 +162,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
     shell: 'round',
     topper: 'terminal',
     emblem: 'terminal',
-    aliases: ['opencode', 'open-code'],
+    aliases: ['opencode'],
   },
   openrouter: {
     id: 'openrouter',
@@ -171,7 +171,7 @@ export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
     shell: 'box',
     topper: 'router',
     emblem: 'router',
-    aliases: ['openrouter', 'open-router'],
+    aliases: ['openrouter'],
   },
   anthropic: {
     id: 'anthropic',

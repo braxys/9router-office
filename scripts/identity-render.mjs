@@ -165,6 +165,11 @@ const report = await evaluate(`(() => {
   const pills = [...document.querySelectorAll('[data-robot-pill]')].map((el) => {
     const r = el.getBoundingClientRect();
     return {
+      // Match on the agent id, not the pill's text: the text is the name plus a
+      // status label, so a name that prefixes another (OpenAI vs OpenAI Codex)
+      // would pair a robot with a different robot's pill and the clearance check
+      // would then pass against the wrong geometry.
+      id: el.getAttribute('data-robot-pill'),
       text: el.textContent.trim().replace(/\\s+/g, ' '),
       left: Math.round(r.left), right: Math.round(r.right),
       top: Math.round(r.top), bottom: Math.round(r.bottom),
@@ -192,7 +197,7 @@ const report = await evaluate(`(() => {
       return count;
     })(),
     identityTopY: identityTopY(r.object),
-    pill: pills.find((p) => p.text.startsWith(r.name)) ?? null,
+    pill: pills.find((p) => p.id === r.id) ?? null,
   }));
 })()`);
 

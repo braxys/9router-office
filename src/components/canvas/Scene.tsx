@@ -406,7 +406,7 @@ function AgentNode({
             </div>
           )}
           <div
-            data-robot-pill
+            data-robot-pill={id}
             className="flex items-center gap-1.5 rounded-full border-2 px-2.5 py-1 whitespace-nowrap"
             style={{
               backgroundColor: 'rgba(255, 253, 248, 0.94)',

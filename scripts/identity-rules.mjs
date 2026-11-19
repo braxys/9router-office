@@ -30,7 +30,7 @@ import {
   robotBounds,
   robotNodePosition,
 } from '../src/lib/robotModel.ts';
-import { IDENTITIES, resolveIdentity } from '../src/lib/providerIdentity.ts';
+import { IDENTITIES, UNKNOWN_PROVIDER_COLORS, resolveIdentity } from '../src/lib/providerIdentity.ts';
 import { readFileSync } from 'node:fs';
 
 let failures = 0;
@@ -364,6 +364,28 @@ const triples = Object.values(IDENTITIES).map(
 check('no two identities share shell+topper+colour', new Set(triples).size, triples.length);
 
 /* -------------------------------------------------------------------------- */
+console.log('\n--- assertion 6b: a part never asks for a colour its identity lacks ---\n');
+
+// `accent2` is the second brand colour, and only some identities declare one.
+// A shape table that asks for `accent2` on an identity without it silently falls
+// back to the body colour (`RobotParts.tsx` resolves `identity.accent2 ?? accent`),
+// which is how a pupil ends up the same green as its lids and a muzzle merges
+// into the head: the part is there, it just stops being visible. The spec marks
+// `accent2` as `-` for kilocode/nvidia/ollama, so those parts must use a colour
+// that actually exists rather than borrowing a second brand colour they never had.
+for (const id of Object.keys(IDENTITIES)) {
+  const declared = IDENTITIES[id].accent2;
+  const asking = identityPartsFor(resolveIdentity(id))
+    .filter((part) => part.color === 'accent2')
+    .map((part) => part.id);
+  if (declared === undefined) {
+    check(`${id} declares no accent2, so no part may ask for one`, asking, []);
+  } else {
+    check(`${id} declares accent2 and its parts may use it`, asking.length > 0, true);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 console.log('\n--- assertion 7: one source of colour ---\n');
 
 for (const id of Object.keys(IDENTITIES)) {
@@ -381,10 +403,24 @@ check(
   resolveIdentity('zzz-unknown').color !== resolveIdentity('qqq-unknown').color,
   true,
 );
+// Stability has to be checked across a *separate* call after other resolutions:
+// comparing two calls of the same expression to each other is a tautology that
+// can never fail, even if the hash were seeded per call.
+const firstUnknownColour = resolveIdentity('zzz-unknown').color;
+resolveIdentity('qqq-unknown');
+resolveIdentity('codebuddy');
+resolveIdentity('another-foreign-provider');
 check(
   'the same unknown provider resolves to the same colour',
   resolveIdentity('zzz-unknown').color,
-  resolveIdentity('zzz-unknown').color,
+  firstUnknownColour,
+);
+// Pinned to the palette, so a change to the hash or the colour list is visible
+// here instead of silently recolouring every unknown provider in the office.
+check(
+  'an unknown provider takes its colour from the fallback palette',
+  UNKNOWN_PROVIDER_COLORS.includes(firstUnknownColour),
+  true,
 );
 check(
   'an unknown provider keeps the default body shape',
@@ -458,9 +494,17 @@ for (const [id, identity] of Object.entries(IDENTITIES)) {
 // A duplicate alias means one identity is unreachable — the resolver returns
 // whichever entry the table happens to list first.
 const seen = new Map();
+const duplicateWithinIdentity = [];
 for (const [id, identity] of Object.entries(IDENTITIES)) {
+  const localKeys = new Set();
   for (const alias of identity.aliases) {
     const key = normalise(alias);
+    // Two spellings of the same alias inside one identity (`nous-research` and
+    // `nousresearch`) are redundant but harmless: the resolver still picks that
+    // identity. Flag them so the table stays honest, not as a routing bug.
+    if (localKeys.has(key)) duplicateWithinIdentity.push(`${id}:${key}`);
+    localKeys.add(key);
+
     const owner = seen.get(key);
     if (owner && owner !== id) {
       check(`alias "${alias}" is claimed by ${owner} and ${id}`, owner, id);
@@ -468,7 +512,18 @@ for (const [id, identity] of Object.entries(IDENTITIES)) {
     seen.set(key, id);
   }
 }
-check('no alias is claimed twice', seen.size, [...seen.keys()].length);
+// The property that actually matters: no two *different* identities may claim
+// the same normalised alias, or one of them is unreachable. (Comparing a Map's
+// size to its own key count would be a tautology.)
+check(
+  'no alias is claimed by two different identities',
+  [...seen.values()].length,
+  Object.values(IDENTITIES).reduce(
+    (sum, identity) => sum + new Set(identity.aliases.map(normalise)).size,
+    0,
+  ),
+);
+check('no identity repeats one of its own aliases', duplicateWithinIdentity, []);
 
 /* -------------------------------------------------------------------------- */
 console.log('\n--- one owner for whatever sits on the antenna ---\n');
