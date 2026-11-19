@@ -19,8 +19,10 @@
 //   6. the dock never overlaps the top HUD and keeps its header on screen;
 //   7. all three camera presets are visible and enabled, and all four mood
 //      cells are reachable, on whichever surface is visible;
-//   8. the panel is exactly 320px wide at `lg`+, the width the camera framing
-//      is tuned against;
+//   8. the panel is exactly 320px wide at `lg`+, and it floats over a
+//      full-bleed canvas rather than sitting beside it — the canvas must cover
+//      the viewport and the panel must be inside it, or the panel column is
+//      painted by `main`'s sky colour where the floor and wall should be;
 //   9. every robot name pill sits fully inside the canvas at every viewport,
 //      so the camera can never crop a desk out of frame.
 //
@@ -406,14 +408,24 @@ const probe = `(() => {
    * Prefer the pill container's own attribute; fall back to walking up from the
    * name span by its classes, so a refactor that drops the attribute degrades to
    * a working check instead of a vacuous pass.
+   *
+   * The fallback filters on className rather than using a CSS selector: the
+   * name span's class is text-[10px], which a selector would have to escape as
+   * .text-\\[10px\\] — and those backslashes do not survive the trip through
+   * this template literal into the page, where they collapse to .text-[10px]
+   * and make querySelectorAll throw a SyntaxError on an invalid selector.
    */
   const pillEls = [
     ...document.querySelectorAll('[data-robot-pill]'),
   ];
   if (pillEls.length === 0) {
-    for (const span of document.querySelectorAll(
-      '.canvas-host span.text-\\[10px\\].font-extrabold.tracking-tight',
-    )) {
+    const nameSpans = [...document.querySelectorAll('.canvas-host span')].filter(
+      (span) =>
+        span.className.includes('text-[10px]') &&
+        span.className.includes('font-extrabold') &&
+        span.className.includes('tracking-tight'),
+    );
+    for (const span of nameSpans) {
       const pill = span.closest('div.rounded-full');
       if (pill && !pillEls.includes(pill)) pillEls.push(pill);
     }
@@ -509,7 +521,18 @@ for (const { w, h } of VIEWPORTS) {
   });
   await delay(800);
   const res = await send('Runtime.evaluate', { expression: probe, returnByValue: true });
+  // A probe that throws returns no value, and every assertion below would then
+  // die on `d.panels` with a TypeError that says nothing about the page. Report
+  // the page's own error instead: it is always a real defect (a missing app, a
+  // bad selector, a store that failed to hydrate), never a reason to pass.
+  if (res.exceptionDetails) {
+    const detail = res.exceptionDetails.exception?.description ?? res.exceptionDetails.text;
+    throw new Error(
+      `layout probe threw at ${w}x${h}: ${String(detail).split('\n')[0]}`,
+    );
+  }
   const d = res.result.value;
+  if (!d) throw new Error(`layout probe returned no data at ${w}x${h}`);
 
   const problems = [];
   const known = [];
@@ -629,9 +652,11 @@ for (const { w, h } of VIEWPORTS) {
     }
   }
 
-  // 5b. The panel's width is what makes the canvas narrow, so it is part of the
-  // contract: the 344px it takes (320 + wrapper padding) is the number the
-  // camera framing is tuned against. A wider panel silently re-crops the scene.
+  // 5b. The panel's width is part of the framing contract. The scene is
+  // full-bleed behind the panel, so the panel's footprint (320 + its 12px
+  // padding) is what decides how much of the canvas is actually visible —
+  // `visibleSceneWidth()` feeds that number to the camera. A wider panel
+  // silently re-crops the office without moving a single DOM box.
   if (d.panel && Math.abs(d.panel.w - PANEL_W) > 1) {
     problems.push(`PANEL WIDTH ${d.panel.w} expected ${PANEL_W}`);
   }
@@ -669,6 +694,34 @@ for (const { w, h } of VIEWPORTS) {
     ) {
       problems.push(
         `ROBOT PILL OUTSIDE CANVAS "${pill.name}" x${r.left}-${r.right} y${r.top}-${r.bottom} ` +
+          `vs canvas x${c.left}-${c.right} y${c.top}-${c.bottom}`,
+      );
+    }
+  }
+
+  // 5d. The scene is full-bleed. The canvas must cover the whole viewport and
+  // the side panel must float *over* it. If the canvas stops at the scene
+  // column's edge instead, the 344px panel column — its 12px gutter, its 32px
+  // right margin and the whole area below the panel — is painted by `main`'s
+  // `bg-office-sky`, so the office reads as a hard blue band where the floor
+  // and the wall should be. That is a painted-colour defect no geometry check
+  // can see, so it is asserted here as a coverage contract.
+  if (d.canvas) {
+    const c = d.canvas;
+    if (c.left > 1 || c.top > 1 || c.right < d.vw - 1 || c.bottom < d.vh - 1) {
+      problems.push(
+        `CANVAS NOT FULL-BLEED x${c.left}-${c.right} y${c.top}-${c.bottom} vs viewport ${d.vw}x${d.vh}`,
+      );
+    }
+    if (
+      d.panel &&
+      (d.panel.left < c.left - 1 ||
+        d.panel.right > c.right + 1 ||
+        d.panel.top < c.top - 1 ||
+        d.panel.bottom > c.bottom + 1)
+    ) {
+      problems.push(
+        `PANEL NOT OVER SCENE x${d.panel.left}-${d.panel.right} y${d.panel.top}-${d.panel.bottom} ` +
           `vs canvas x${c.left}-${c.right} y${c.top}-${c.bottom}`,
       );
     }

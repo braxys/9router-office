@@ -472,11 +472,25 @@ function Window({
 
 export function OfficeRoom() {
   const WALL_H = 4.4;
-  const ROOM = 9.5; // half-extent
+  const ROOM = 9.5; // half-extent, walls
+  /**
+   * The floor runs further than the walls.
+   *
+   * The scene is full-bleed behind the simulation panel, so the camera draws a
+   * strip of office that the panel covers. At the bottom-right of that strip
+   * the view rays reach past the walled room — measured up to 12.25 units from
+   * the origin at 1280x600 — and with the floor ending at `ROOM` the sky showed
+   * through next to the sidebar, which is exactly the flat-blue band this
+   * layout change is meant to remove.
+   *
+   * 13 keeps a margin past that worst case while staying a cheap single
+   * instanced draw call (the plank count grows with area, not with draws).
+   */
+  const FLOOR = 13;
 
   return (
     <group>
-      <WoodFloor size={ROOM * 2} />
+      <WoodFloor size={FLOOR * 2} />
 
       {/* ---- back wall (behind the desks, -Z) ---- */}
       <group position={[0, 0, -ROOM]}>
