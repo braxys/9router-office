@@ -568,6 +568,19 @@ check('accent-only palette still wins for accent',
 check('accent-only palette leaves limb on the darkened body',
   resolveRobotColor('limb', ACCENT, { accent: '#111111' }), darkenHex(ACCENT, LIMB_DARKEN));
 
+// A palette that declares `body` but neither `limb` nor `extra`. This is the only
+// input shape that can tell `darkenHex(body)` apart from `darkenHex(accent)`:
+// every other fallback case has body === accent, so both readings agree and a
+// regression to accent-derivation would slip through. `extra` is asserted on the
+// same input because it falls back through `limb`, so one palette locks both paths.
+const BODY_ONLY = { body: '#FF0000' };
+check('body-only palette derives limb from the body, not the accent',
+  resolveRobotColor('limb', ACCENT, BODY_ONLY), '#d10000');
+check('body-only palette derives extra from the same darkened body',
+  resolveRobotColor('extra', ACCENT, BODY_ONLY), '#d10000');
+check('body-only palette keeps accent on the body',
+  resolveRobotColor('accent', ACCENT, BODY_ONLY), '#FF0000');
+
 /* -------------------------------------------------------------------------- */
 console.log('\n--- telemetry: the simulation roster carries real identities ---\n');
 
