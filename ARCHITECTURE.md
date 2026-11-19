@@ -189,7 +189,7 @@ src/
 Generated assets and tooling:
 ```text
 public/models/worker-robot.glb       generated model (72 616 bytes, 30 parts, 2.365 m)
-public/models/worker-robot.meta.json build manifest (part count, bounds, tintable meshes)
+public/models/worker-robot.meta.json build manifest (part count, height, node names)
 scripts/build-robot-model.mjs        `npm run build:model` — writes both files from robotModel.ts
 scripts/identity-rules.mjs           `npm run identity:test` — truth table for providerIdentity.ts
 scripts/identity-render.mjs          live-graph gate: shells, toppers, baked ball, role colours, pill clearance
@@ -274,9 +274,10 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   `DESK_SEAT` is applied exactly once (the first build applied it twice and floated).
 - **Per-agent colour.** `SkeletonUtils.clone` shares materials, so each clone's materials are
   cloned before tinting all four roles — `body` (cranium, chest), `limb` (upper arms, thighs),
-  `accent` (bow tie, badge stripe) and `extra` (shins); otherwise all four desks turn the same
-  colour. `RECOLOR_ROLES` in `src/lib/robotModel.ts` is the one list both the build script and
-  `ModelRobot` read, and the generator fails if a part carries the wrong role after the round trip.
+  `accent` (bow tie, badge stripe, crest, topper, emblem) and `extra` (shins); otherwise all four
+  desks turn the same colour. `RECOLOR_ROLES` in `src/lib/robotModel.ts` is the one list both the
+  build script and `ModelRobot` read, and the generator fails if a part carries the wrong role
+  after the round trip.
 - **Loading is imperative, not Suspense.** `useGLTF` suspends by throwing and then rethrows the
   rejection during render, and React 19 reports *every* caught render error to `window`, so a
   missing file could never pass a zero-page-error gate even with a boundary. `ModelRobot` calls

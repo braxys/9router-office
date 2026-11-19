@@ -47,9 +47,11 @@ export type HexColor = `#${string}`;
 /**
  * One agent's four brand roles, taken from its real logo.
  *
- * Every role is optional, and a gap falls back to the runtime `accent` rather
- * than to a hard-coded hex: that is what keeps a provider with no table entry
- * exactly as it looks today, with no data written for it.
+ * Every role is optional. A gap falls back through the chain documented on
+ * `resolveRobotColor` — `limb` from the darkened `body`, `accent` from `body`,
+ * `extra` from `limb` — never to a hard-coded hex. That is what lets a provider
+ * with no table entry keep today's body, limb, shin and badge colours with no
+ * data written for it; its bow tie now follows the `accent` role.
  */
 export interface RobotPalette {
   /** Dominant brand colour: cranium + chest. */

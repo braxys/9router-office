@@ -35,7 +35,7 @@ that the robots send parcels to.
 - **Per-provider body colour:** each bot wears a four-role brand palette — `body` (cranium and
   chest), `limb` (upper arms and thighs), `accent` (bow tie, badge stripe, and most of the crest,
   topper and emblem) and `extra` (shins) — so a bot reads multi-colour rather than one flat hue. The
-  rest of the identity parts take `body`, `limb` or `extra`. The colours are taken from each
+  rest of the identity parts take `body`, `limb`, `extra` or `cream`. The colours are taken from each
   provider's own logo; the full per-provider table lives in `src/lib/providerIdentity.ts`.
   Unknown providers keep the hash-derived runtime colour.
 

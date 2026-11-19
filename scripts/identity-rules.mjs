@@ -393,6 +393,26 @@ check('no body part is pink any more',
   ROBOT_PARTS.filter((part) => part.color === 'pink' || part.color === 'pinkDeep').map((part) => part.id), []);
 check('FACE.errorBar keeps its pink', FACE.errorBar.color, 'pink');
 
+// The office palette, written out for the same reason `PALETTE_GRID` is: every
+// other check on a `ROBOT_COLORS` entry compares a role key, and the render gate
+// resolves through the same table, so a typo in a hex would pass every gate.
+// `FACE.errorBar` in particular is a single part whose colour is otherwise only
+// ever asserted by name.
+const ROBOT_COLORS_GRID = {
+  cream: '#fdfbf6',
+  ink: '#3a4a58',
+  blush: '#ffb4c0',
+  pink: '#ff6b7a',
+  pinkDeep: '#e05a6a',
+  metal: '#c9d6e0',
+  white: '#ffffff',
+  yellow: '#ffc94d',
+};
+
+for (const [key, expected] of Object.entries(ROBOT_COLORS_GRID)) {
+  check(`ROBOT_COLORS.${key} is the office hex`, ROBOT_COLORS[key], expected);
+}
+
 // The generator bakes `userData.recolor` from this list and `ModelRobot` tints
 // from it. A role in the list that no base part uses is dead weight; a role used
 // by a base part but missing from the list is a mesh that never gets tinted.

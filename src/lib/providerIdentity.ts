@@ -50,7 +50,9 @@ export interface ProviderIdentity {
    * The four brand roles from the provider's real logo.
    *
    * `{}` only on `default`: the runtime accent hashed from the key wins, which
-   * is what keeps an unknown provider exactly as it looks today.
+   * keeps an unknown provider's body, limbs, shins and badge as they are today.
+   * One part moved: the bow tie is the `accent` role, so it takes the hash
+   * colour instead of the old baked pink.
    */
   palette: RobotPalette;
   shell: ShellId;
@@ -85,7 +87,8 @@ export interface ResolvedIdentity {
  * the data, not a side effect of the fallback chain.
  *
  * `default` is the empty palette on purpose — an unknown provider keeps the
- * colour hashed from its key, which is exactly today's look.
+ * colour hashed from its key, which keeps its body, limbs, shins and badge as
+ * they are today; only the bow tie now takes the `accent` role.
  */
 export const IDENTITIES: Record<IdentityId, ProviderIdentity> = {
   default: {

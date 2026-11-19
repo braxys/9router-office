@@ -352,7 +352,7 @@ palette?)` resolves a part's colour at render time.
       colour against the hex its role resolves to; `hasModelRoot` proves the `.glb` run is not
       measuring the procedural fallback.
 
-**Phase 5.1 verification:** `npm run identity:test` → 715 assertions, `npm run identity:render` →
+**Phase 5.1 verification:** `npm run identity:test` → 723 assertions, `npm run identity:render` →
 42 assertions (procedural rig), `npm run identity:render:model` → 42 assertions (`.glb` rig),
 `npm run build:model` → `parts 30`, `height 2.365 m`, `tintable 12 meshes` with a deterministic
 `.glb` sha256 across runs, `npx tsc --noEmit` → 0, `npx eslint` → 0.
