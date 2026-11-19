@@ -9,12 +9,39 @@
 // `?capture=1`, which is what makes `Scene` publish the scene graph on
 // `window.__office`.
 //
-// Usage: node scripts/identity-render.mjs      (npm run identity:render)
+// Two bodies to prove, one gate:
+//   npm run identity:render        procedural rig  (?capture=1)
+//   npm run identity:render:model  .glb rig        (?capture=1&model=on)
+// The `--model` flag picks the rig; `TARGET_URL` still overrides the URL outright.
+//
+// Usage: node scripts/identity-render.mjs [--model]
 //   CDP_PORT=9223   TARGET_URL=http://localhost:3001
 import { setTimeout as delay } from 'node:timers/promises';
 
+import {
+  EMBLEMS,
+  ROBOT_PARTS,
+  SHELLS,
+  TOPPERS,
+  resolveRobotColor,
+} from '../src/lib/robotModel.ts';
+import { IDENTITIES } from '../src/lib/providerIdentity.ts';
+
 const PORT = Number(process.env.CDP_PORT ?? 9223);
-const URL = process.env.TARGET_URL ?? 'http://localhost:3001/?capture=1';
+const MODEL_FLAG = process.argv.includes('--model');
+const URL =
+  process.env.TARGET_URL ??
+  (MODEL_FLAG ? 'http://localhost:3001/?capture=1&model=on' : 'http://localhost:3001/?capture=1');
+
+// `ModelRobot` renders the procedural robot while the file loads, so a gate that
+// measured too early would "pass" on the fallback and never touch the `.glb`.
+// Derived from the URL, not the flag, so a manual TARGET_URL gets the same rule.
+//
+// `globalThis.URL` on purpose: this module's `const URL` shadows the global URL
+// constructor, and `new URL(URL)` would hit the temporal dead zone and throw.
+const modelParam = new globalThis.URL(URL).searchParams.get('model');
+const EXPECT_MODEL = modelParam !== null && modelParam !== 'off' && modelParam !== '0';
+console.log(`rig: ${EXPECT_MODEL ? '.glb' : 'procedural'} (${URL})`);
 
 let failures = 0;
 let total = 0;
@@ -28,6 +55,21 @@ function check(label, actual, expected) {
     console.log(`      expected: ${JSON.stringify(expected)}`);
     console.log(`      actual  : ${JSON.stringify(actual)}`);
   }
+}
+
+/** Every part this identity should be wearing, with the hex its role resolves to. */
+function expectedParts(identityId, accentColor) {
+  const identity = IDENTITIES[identityId];
+  const parts = [
+    ...ROBOT_PARTS,
+    ...SHELLS[identity.shell],
+    ...TOPPERS[identity.topper],
+    ...EMBLEMS[identity.emblem],
+  ];
+  return parts.map((part) => ({
+    name: part.id,
+    color: resolveRobotColor(part.color, accentColor, identity.palette).toLowerCase(),
+  }));
 }
 
 async function getJSON(path) {
@@ -100,7 +142,9 @@ while (Date.now() - started < TIMEOUT_MS) {
   try {
     ready = await evaluate(`(() => {
       const o = window.__office;
-      return !!(o && o.scene && o.robots && o.robots.length > 0);
+      if (!(o && o.scene && o.robots && o.robots.length > 0)) return false;
+      if (!${EXPECT_MODEL}) return true;
+      return o.robots.every((r) => !!r.object.getObjectByName('WorkerRobot'));
     })()`);
   } catch {
     ready = false;
@@ -111,8 +155,11 @@ while (Date.now() - started < TIMEOUT_MS) {
 console.log(`scene ready: ${ready} after ${Date.now() - started}ms`);
 if (!ready) {
   console.error(
-    '\nFAIL: window.__office never appeared. Scene only publishes it under ' +
-      '`?capture=1`; check the URL and that the canvas mounted.',
+    EXPECT_MODEL
+      ? '\nFAIL: the .glb body never mounted on all four desks — check that ' +
+          'public/models/worker-robot.glb loads (Network tab) and that ?capture=1 is in the URL.'
+      : '\nFAIL: window.__office never appeared. Scene only publishes it under ' +
+          '`?capture=1`; check the URL and that the canvas mounted.',
   );
   process.exit(1);
 }
@@ -124,10 +171,21 @@ await delay(1500);
 
 const report = await evaluate(`(() => {
   const office = window.__office;
-  const meshNames = (root) => {
-    const names = [];
-    root.traverse((o) => { if (o.isMesh && o.name) names.push(o.name); });
-    return names;
+  // No visibility filter: the existing "mounts identity meshes" assertions below
+  // mean "exists in the graph", and quietly excluding hidden meshes would weaken
+  // them. The baked antennaBall is hidden on .glb and simply never appears in
+  // expectedParts, so it costs nothing here.
+  const meshes = (root) => {
+    const out = [];
+    root.traverse((o) => {
+      if (!o.isMesh || !o.name) return;
+      const material = Array.isArray(o.material) ? o.material[0] : o.material;
+      out.push({
+        name: o.name,
+        color: material?.color ? '#' + material.color.getHexString() : null,
+      });
+    });
+    return out;
   };
   // Topmost screen-space Y reached by any head-mounted identity mesh (shell or
   // topper), in canvas-relative CSS pixels. Only the top edge matters: the shell
@@ -179,7 +237,8 @@ const report = await evaluate(`(() => {
     name: r.name,
     identity: r.identity,
     accentColor: r.accentColor,
-    meshes: meshNames(r.object),
+    meshes: meshes(r.object),
+    hasModelRoot: !!r.object.getObjectByName('WorkerRobot'),
     // The pulse group is what makes any topper feel alive; without it the
     // provider bot would sit dead still where the default ball used to bounce.
     topperPulseGroups: (() => {
@@ -235,13 +294,13 @@ const EXPECTED_PREFIXES = ['shell', 'top', 'em'];
 for (const robot of report) {
   if (robot.identity === 'default') {
     check(`${robot.name} [default] adds no identity meshes`, 
-      robot.meshes.filter((name) => EXPECTED_PREFIXES.some((p) => name.startsWith(p))).length,
+      robot.meshes.filter((mesh) => EXPECTED_PREFIXES.some((p) => mesh.name.startsWith(p))).length,
       0,
     );
     continue;
   }
-  const identityMeshes = robot.meshes.filter((name) =>
-    EXPECTED_PREFIXES.some((prefix) => name.startsWith(prefix)),
+  const identityMeshes = robot.meshes.filter((mesh) =>
+    EXPECTED_PREFIXES.some((prefix) => mesh.name.startsWith(prefix)),
   );
   check(`${robot.name} [${robot.identity}] mounts identity meshes`, identityMeshes.length > 0, true);
 }
@@ -270,10 +329,60 @@ for (const robot of report) {
 }
 
 /* -------------------------------------------------------------------------- */
-console.log('\n--- the body colour is the identity colour ---\n');
+console.log(`\n--- every part wears the colour of its role (${EXPECT_MODEL ? '.glb' : 'procedural'} rig) ---\n`);
 
 for (const robot of report) {
-  check(`${robot.name} has a hex accent colour`, /^#[0-9a-fA-F]{6}$/.test(robot.accentColor), true);
+  // Proof the gate is looking at the body it claims to test: the procedural rig
+  // has no `WorkerRobot` node, so this is false there and must be true on `.glb`.
+  // Without it, a failed model load would fall back to the procedural robot and
+  // every colour assertion below would pass without the `.glb` being involved.
+  check(
+    `${robot.name} [${robot.identity}] is the ${EXPECT_MODEL ? '.glb' : 'procedural'} body`,
+    robot.hasModelRoot,
+    EXPECT_MODEL,
+  );
+
+  check(
+    `${robot.name} [${robot.identity}] carries a hex accent colour`,
+    /^#[0-9a-fA-F]{6}$/.test(robot.accentColor),
+    true,
+  );
+
+  // For a known provider the store's hex must be the palette's own body colour —
+  // that is the contract `WorkDesk`, the mug and the selection ring read from.
+  // For an unknown provider `Scene` has already collapsed the key to `default`,
+  // so the hash colour on the telemetry is the only source left and there is
+  // nothing to compare it against.
+  if (robot.identity !== 'default') {
+    check(
+      `${robot.name} [${robot.identity}] accentColor is the palette's body colour`,
+      robot.accentColor.toLowerCase(),
+      IDENTITIES[robot.identity].palette.body.toLowerCase(),
+    );
+  }
+
+  const expected = expectedParts(robot.identity, robot.accentColor);
+  const actual = new Map(robot.meshes.map((mesh) => [mesh.name, mesh.color]));
+  const missing = [];
+  const wrong = [];
+  for (const part of expected) {
+    // A mesh with no `color` reads as `null` from the bridge, so `undefined` is
+    // not the only "not wearing this role" case — guard both or the loop throws.
+    const got = actual.get(part.name);
+    if (got === undefined || got === null) missing.push(part.name);
+    else if (got.toLowerCase() !== part.color) wrong.push(`${part.name}: ${got} != ${part.color}`);
+  }
+
+  check(
+    `${robot.name} [${robot.identity}] every part wears its role colour`,
+    { missing, wrong },
+    { missing: [], wrong: [] },
+  );
+  check(
+    `${robot.name} [${robot.identity}] has enough parts to prove the mapping`,
+    expected.length >= 20,
+    true,
+  );
 }
 
 /* -------------------------------------------------------------------------- */

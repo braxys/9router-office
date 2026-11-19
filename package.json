@@ -13,6 +13,8 @@
     "perf": "node scripts/perf.mjs",
     "status:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/status-rules.mjs",
     "identity:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-rules.mjs",
+    "identity:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-render.mjs",
+    "identity:render:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-render.mjs --model",
     "status:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/explain-status.mjs",
     "build:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-robot-model.mjs"
   },
