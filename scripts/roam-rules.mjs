@@ -53,6 +53,44 @@ check('LEG_KINEMATICS.standingRootY is defined and positive', LEG_KINEMATICS.sta
 check('LEG_KINEMATICS.hipPivotY is 0.2', LEG_KINEMATICS.hipPivotY, 0.2);
 check('LEG_KINEMATICS.seatedHipAngle is PI / 2', Math.abs(LEG_KINEMATICS.seatedHipAngle - Math.PI / 2) < 0.001, true);
 
+console.log('\n--- Task 3: Idle Roam State Machine ---\n');
+import {
+  createInitialRoamState,
+  stepRoamState,
+} from '../src/lib/idleRoamState.ts';
+
+const deskSeat = { x: 0, y: 0.4, z: -0.78 };
+const s0 = createInitialRoamState(deskSeat);
+check('initial state subState is SEATED', s0.subState, 'SEATED');
+
+const out0 = stepRoamState(s0, {
+  status: 'IDLE',
+  deskSeat,
+  targetPoi: null,
+  slotPos: [0, 0, 0],
+  slotRotY: 0,
+}, 0.05);
+check('initial step output isSeated is true', out0.isSeated, true);
+
+// Test interruption: if status transitions to THINKING while state is WALK_TO_POI
+const walkingState = {
+  ...s0,
+  subState: 'WALK_TO_POI',
+  position: [2.0, LEG_KINEMATICS.standingRootY, 2.0],
+  targetLocal: [5.0, 0, 5.0],
+};
+const interrupted = stepRoamState(walkingState, {
+  status: 'THINKING',
+  deskSeat,
+  targetPoi: null,
+  slotPos: [0, 0, 0],
+  slotRotY: 0,
+}, 0.05);
+
+check('interruption during WALK_TO_POI switches subState to SPRINT_BACK', interrupted.nextState.subState, 'SPRINT_BACK');
+check('sprint speed is >= 3.0', interrupted.speed >= 3.0, true);
+
+
 
 if (failures > 0) {
   console.error(`\n${failures} of ${total} checks failed.\n`);
