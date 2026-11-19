@@ -1,0 +1,54 @@
+/**
+ * Tests for office POIs, coordinate conversions, and roaming kinematics.
+ *
+ *   npm run roam:test
+ */
+import {
+  OFFICE_POIS,
+  worldToSlotLocal,
+  slotLocalToWorld,
+  pickNextPoi,
+} from '../src/lib/officePoints.ts';
+
+let failures = 0;
+let total = 0;
+
+function check(label, actual, expected) {
+  total += 1;
+  const pass = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!pass) failures += 1;
+  console.log(`${pass ? 'PASS' : 'FAIL'}  ${label}`);
+  if (!pass) {
+    console.log(`      expected: ${JSON.stringify(expected)}`);
+    console.log(`      actual  : ${JSON.stringify(actual)}`);
+  }
+}
+
+console.log('\n--- Task 1: POI Registry and Coordinate Conversion ---\n');
+
+// 1. POIs must be defined and stay in unoccluded room zones (x < 7.0)
+check('OFFICE_POIS has at least 5 points', OFFICE_POIS.length >= 5, true);
+check('all POIs stay clear of right sidebar x < 7.0', OFFICE_POIS.every((p) => p.worldPos[0] < 7.0), true);
+
+// 2. Coordinate conversions
+const slotPos = [3.8, 0, 0];
+const slotRotY = -Math.PI / 2;
+const worldTarget = [0, 0, 0];
+const local = worldToSlotLocal(worldTarget, slotPos, slotRotY);
+const backToWorld = slotLocalToWorld(local, slotPos, slotRotY);
+
+const errorDist = Math.hypot(backToWorld[0] - worldTarget[0], backToWorld[2] - worldTarget[2]);
+check('world -> slotLocal -> world preserves coordinate accurately', errorDist < 0.001, true);
+
+// 3. POI selection alternates
+const p1 = pickNextPoi(null, 123);
+const p2 = pickNextPoi(p1.id, 124);
+check('pickNextPoi selects valid POI', typeof p1.id === 'string' && p1.worldPos.length === 3, true);
+check('pickNextPoi does not repeat previous POI', p1.id !== p2.id, true);
+
+if (failures > 0) {
+  console.error(`\n${failures} of ${total} checks failed.\n`);
+  process.exit(1);
+} else {
+  console.log(`\nAll ${total} checks passed.\n`);
+}

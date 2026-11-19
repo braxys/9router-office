@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs --trigger-states",
     "layout:test": "node scripts/layout-check.mjs",
+    "layout:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/hud-layout-rules.mjs",
     "perf": "node scripts/perf.mjs",
     "status:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/status-rules.mjs",
     "identity:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-rules.mjs",
+    "roam:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/roam-rules.mjs",
     "status:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/explain-status.mjs",
     "build:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-robot-model.mjs"
   },
