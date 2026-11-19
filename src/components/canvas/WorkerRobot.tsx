@@ -4,19 +4,16 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { AgentStatus } from '@/lib/types';
-import {
-  ANTENNA_BALL,
-  FACE,
-  HANDS,
-  ROBOT_COLORS,
-  robotNodePosition,
-} from '@/lib/robotModel';
-import { RobotParts } from './RobotParts';
+import type { ResolvedIdentity } from '@/lib/providerIdentity';
+import { FACE, HANDS, ROBOT_COLORS, robotNodePosition } from '@/lib/robotModel';
+import { AntennaTopper, RobotParts } from './RobotParts';
 import { RobotEffects } from './RobotEffects';
 import { DESK_SEAT } from './WorkDesk';
 
 export interface WorkerRobotProps {
   accentColor: string;
+  /** Which provider bot this is: its shell, topper and emblem. */
+  identity: ResolvedIdentity;
   status: AgentStatus;
   /** Unit direction (local space) from the robot toward the central hub. */
   towardHub: [number, number];
@@ -36,20 +33,20 @@ function spring(current: number, target: number, dt: number, stiffness = 9) {
 /** Chunky monitor-style head with big expressive square eyes. */
 function RobotHead({
   accent,
+  identity,
   status,
   headRef,
   antennaRef,
-  antennaBallRef,
   eyeLRef,
   eyeRRef,
   eyeSpinRef,
   mouthRef,
 }: {
   accent: string;
+  identity: ResolvedIdentity;
   status: AgentStatus;
   headRef: React.RefObject<THREE.Group | null>;
   antennaRef: React.RefObject<THREE.Group | null>;
-  antennaBallRef: React.RefObject<THREE.Mesh | null>;
   eyeLRef: React.RefObject<THREE.Group | null>;
   eyeRRef: React.RefObject<THREE.Group | null>;
   eyeSpinRef: React.RefObject<THREE.Group | null>;
@@ -67,8 +64,9 @@ function RobotHead({
 
   return (
     <group ref={headRef} position={[headX, headY, headZ]}>
-      {/* cranium, face plate and ear bolts come from the part spec */}
-      <RobotParts node="head" accent={accent} />
+      {/* cranium, face plate and ear bolts come from the part spec; the
+          identity's shell grows the silhouette around them */}
+      <RobotParts node="head" identity={identity} accent={accent} />
 
       {/* eyes — driven at runtime (blink / squint / spin), so they keep refs */}
       <group ref={eyeSpinRef} position={FACE.eyeGroup.position}>
@@ -144,15 +142,11 @@ function RobotHead({
         </mesh>
       ))}
 
-      {/* antenna — stalk from the spec, ball driven at runtime */}
+      {/* antenna — stalk from the spec (body only: the topper owns the tip),
+          then whatever that provider puts on top, pulsing as one unit */}
       <group ref={antennaRef} position={[antennaX - headX, antennaY - headY, antennaZ - headZ]}>
-        <RobotParts node="antenna" accent={accent} />
-        <mesh ref={antennaBallRef} position={ANTENNA_BALL.position}>
-          <sphereGeometry
-            args={[ANTENNA_BALL.radius, ANTENNA_BALL.segments, ANTENNA_BALL.segments]}
-          />
-          <meshLambertMaterial color={ROBOT_COLORS.yellow} />
-        </mesh>
+        <RobotParts node="antenna" identity={null} accent={accent} />
+        <AntennaTopper identity={identity} status={status} />
       </group>
     </group>
   );
@@ -173,6 +167,7 @@ function RobotHead({
  */
 export function WorkerRobot({
   accentColor,
+  identity,
   status,
   towardHub,
   tokensPerSecond,
@@ -181,7 +176,6 @@ export function WorkerRobot({
   const torso = useRef<THREE.Group>(null);
   const head = useRef<THREE.Group>(null);
   const antenna = useRef<THREE.Group>(null);
-  const antennaBall = useRef<THREE.Mesh>(null);
   const eyeL = useRef<THREE.Group>(null);
   const eyeR = useRef<THREE.Group>(null);
   const eyeSpin = useRef<THREE.Group>(null);
@@ -255,14 +249,12 @@ export function WorkerRobot({
     }
 
     // ---- Antenna wobble (springy, lags behind the head) ------------------
+    // The pulse itself lives in `<AntennaTopper>`, so it survives the switch
+    // from the default ball to a provider topper.
     if (antenna.current) {
       const wobble = isError ? 0.5 : isThinking ? 0.2 : 0.09;
       antenna.current.rotation.z = Math.sin(t * (isError ? 9 : 2.3)) * wobble;
       antenna.current.rotation.x = Math.cos(t * (isError ? 7 : 1.7)) * wobble * 0.7;
-    }
-    if (antennaBall.current) {
-      const s = 1 + Math.sin(t * (isError ? 12 : 2.6)) * (isError ? 0.18 : 0.07);
-      antennaBall.current.scale.setScalar(s);
     }
 
     // ---- Eyes ------------------------------------------------------------
@@ -322,19 +314,19 @@ export function WorkerRobot({
           The robot sits on the chair; thighs run forward under the desk and
           shins drop to the floor. Without these the robot reads as floating.
           Geometry comes from the shared part spec. */}
-      <RobotParts node="root" accent={accentColor} />
+      <RobotParts node="root" identity={identity} accent={accentColor} />
 
       {/* ------------------------------ TORSO ------------------------------ */}
       <group ref={torso}>
-        <RobotParts node="torso" accent={accentColor} />
+        <RobotParts node="torso" identity={identity} accent={accentColor} />
 
         {/* ---- HEAD ---- */}
         <RobotHead
           accent={accentColor}
+          identity={identity}
           status={status}
           headRef={head}
           antennaRef={antenna}
-          antennaBallRef={antennaBall}
           eyeLRef={eyeL}
           eyeRRef={eyeR}
           eyeSpinRef={eyeSpin}
@@ -344,7 +336,7 @@ export function WorkerRobot({
 
       {/* ------------------------------ ARMS ------------------------------ */}
       <group ref={armL} position={[armLX, armLY, armLZ]}>
-        <RobotParts node="armL" accent={accentColor} />
+        <RobotParts node="armL" identity={identity} accent={accentColor} />
         <mesh ref={handL} position={HANDS.position}>
           <boxGeometry args={[...HANDS.size]} />
           <meshLambertMaterial color={ROBOT_COLORS.cream} />
@@ -352,7 +344,7 @@ export function WorkerRobot({
       </group>
 
       <group ref={armR} position={[armRX, armRY, armRZ]}>
-        <RobotParts node="armR" accent={accentColor} />
+        <RobotParts node="armR" identity={identity} accent={accentColor} />
         <mesh ref={handR} position={HANDS.position}>
           <boxGeometry args={[...HANDS.size]} />
           <meshLambertMaterial color={ROBOT_COLORS.cream} />
