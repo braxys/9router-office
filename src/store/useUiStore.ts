@@ -8,7 +8,7 @@ import type { AgentStatus } from '@/lib/types';
  * simulation side panel is collapsed into its rail.
  *
  * Deliberately NOT part of `useAgentStore`. That store is the telemetry source
- * of truth and `AGENT.md` §6 forbids putting presentation state in it — a
+ * of truth and `AGENTS.md` §6 forbids putting presentation state in it — a
  * preference change must never look like a telemetry update.
  *
  * Hydration: the store always *starts* at the defaults so the server render and

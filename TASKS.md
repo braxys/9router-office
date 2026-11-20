@@ -59,7 +59,7 @@ Replace the dark sci-fi command centre with a bright, toy-like isometric office 
 - [x] Set the initial isometric camera to frame the whole office clearly.
 
 ### Context files
-- [x] Rewrite `AGENT.md` for the Fun & Colorful Blocky Office direction.
+- [x] Rewrite `AGENTS.md` for the Fun & Colorful Blocky Office direction.
 - [x] Rewrite `ARCHITECTURE.md` with the state/animation matrix, scene composition and directory map.
 
 **Phase 1.5 verification:** zero page/console errors across all five states; `npx tsc --noEmit`,
@@ -97,7 +97,7 @@ Optimize rendering for integrated GPUs on thin laptops without changing the visu
 - [x] Move `new THREE.Color()` out of `useFrame` in `WorkDesk.tsx` into `useRef`.
 
 ### Context updates
-- [x] Update `AGENT.md` and `ARCHITECTURE.md` to reflect new performance profile.
+- [x] Update `AGENTS.md` and `ARCHITECTURE.md` to reflect new performance profile.
 
 ## Phase 2: 9Router Telemetry Integration
 - [x] Inspect 9Router's local Web UI (`Usage` page network requests or local DB/logs) and document the exact payload structure in `src/lib/routerAdapter.ts`.

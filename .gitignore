@@ -48,3 +48,6 @@ next-env.d.ts
 # scratch
 /.tmp-*
 /.superpowers/
+
+# design docs and implementation plans (kept locally, not part of the shipped repo)
+/docs/superpowers/
