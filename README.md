@@ -134,4 +134,8 @@ byte-identical file.
 
 ## License
 
-No license file is included yet.
+MIT © 2026 Bagas Hari Muthi. See [`LICENSE`](LICENSE).
+
+Third-party dependencies keep their own licenses — notably Next.js (MIT), React (MIT),
+three.js (MIT) and zustand (MIT). The office diorama, the robot geometry and the generated
+`worker-robot.glb` are original work released under the same MIT terms.
