@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { AGENT_CONFIGS, STATUS_META } from '@/lib/agents';
+import { AGENT_CONFIGS } from '@/lib/agents';
 import { resolveIdentity } from '@/lib/providerIdentity';
 import { useUiStore } from '@/store/useUiStore';
 import type { AgentStatus, AgentTelemetry } from '@/lib/types';
@@ -321,8 +321,3 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     });
   },
 }));
-
-export const selectAgentById = (id: string) => (state: AgentStore) =>
-  state.agents.find((agent) => agent.id === id);
-
-export const statusMeta = (status: AgentStatus) => STATUS_META[status];

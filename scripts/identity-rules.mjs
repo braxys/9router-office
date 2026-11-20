@@ -390,7 +390,7 @@ check('bow tie is the accent role',
 check('shins are the fourth colour', [baseRole.get('shinL'), baseRole.get('shinR')], ['extra', 'extra']);
 check('thighs stay the second colour', [baseRole.get('thighL'), baseRole.get('thighR')], ['limb', 'limb']);
 check('no body part is pink any more',
-  ROBOT_PARTS.filter((part) => part.color === 'pink' || part.color === 'pinkDeep').map((part) => part.id), []);
+  ROBOT_PARTS.filter((part) => part.color === 'pink').map((part) => part.id), []);
 check('FACE.errorBar keeps its pink', FACE.errorBar.color, 'pink');
 
 // The office palette, written out for the same reason `PALETTE_GRID` is: every
@@ -404,7 +404,6 @@ const ROBOT_COLORS_GRID = {
   ink: '#3a4a58',
   blush: '#ffb4c0',
   pink: '#ff6b7a',
-  pinkDeep: '#e05a6a',
   metal: '#c9d6e0',
   white: '#ffffff',
   yellow: '#ffc94d',
@@ -448,7 +447,7 @@ const BODY_ON_PURPOSE = [
   'topCatFace', 'emCatFace',
 ];
 check('no identity part is pink any more',
-  IDENTITY_PARTS.filter((part) => part.color === 'pink' || part.color === 'pinkDeep').map((part) => part.id), []);
+  IDENTITY_PARTS.filter((part) => part.color === 'pink').map((part) => part.id), []);
 
 for (const [table, groups] of [['SHELLS', SHELLS], ['TOPPERS', TOPPERS], ['EMBLEMS', EMBLEMS]]) {
   for (const [id, parts] of Object.entries(groups)) {

@@ -36,7 +36,6 @@ export type PaletteKey =
   | 'ink'
   | 'blush'
   | 'pink'
-  | 'pinkDeep'
   | 'metal'
   | 'white'
   | 'yellow';
@@ -72,7 +71,6 @@ export const ROBOT_COLORS: Record<
   ink: '#3a4a58',
   blush: '#ffb4c0',
   pink: '#ff6b7a',
-  pinkDeep: '#e05a6a',
   metal: '#c9d6e0',
   white: '#ffffff',
   yellow: '#ffc94d',

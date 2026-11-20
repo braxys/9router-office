@@ -125,11 +125,3 @@ export function playConfirm() {
   voice(659, null, 0.08, 'triangle', 0.07);
   voice(784, null, 0.12, 'triangle', 0.14);
 }
-
-/**
- * Test hook: reports whether an audio context exists.
- * Used by the verification script to prove audio stays dormant while muted.
- */
-export function isAudioContextCreated(): boolean {
-  return context !== null;
-}

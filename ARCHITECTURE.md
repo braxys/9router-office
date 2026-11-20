@@ -367,17 +367,14 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   `playConfirm` (rising three-note arpeggio for Reset). No audio files ship with the project.
 - **Muted by default** and gesture-gated: the context is only created from a click or key handler,
   which avoids the browser autoplay warning entirely.
-- **Opt-in is audible immediately** — the toggle plays its own blip after enabling, so the user
-  hears what they switched on. `prefers-reduced-motion` is treated as "keep the extra sensory stuff
-  down" and silences the voices.
-- `isAudioContextCreated()` is a test hook, used to prove audio stays dormant while muted.
+- `prefers-reduced-motion` is treated as "keep the extra sensory stuff down" and silences the
+  voices.
 
 ## 8. Verification Harness
 ```text
 scripts/smoke.mjs   page-ready probe, screenshot, console/page error + failed-request capture
 scripts/perf.mjs    rendered-FPS sampler (counts gl.clear); --idle forces the 30 FPS state
-scripts/shot.mjs    navigates with ?capture=1 and captures a full or clipped screenshot
-scripts/probe.mjs   DOM/GL introspection
+scripts/readme-shots.mjs  captures the README screenshots into docs/screenshots/
 scripts/build-robot-model.mjs  regenerates public/models/worker-robot.glb (+ meta) from robotModel.ts
 scripts/identity-rules.mjs     truth table for providerIdentity.ts (npm run identity:test)
 scripts/identity-render.mjs    live-graph render gate for the per-provider identity (42 assertions)

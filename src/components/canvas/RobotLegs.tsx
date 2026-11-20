@@ -5,8 +5,6 @@ import * as THREE from 'three';
 import { ROBOT_COLORS, resolveRobotColor, type RobotPalette } from '@/lib/robotModel';
 import { LEG_KINEMATICS, type LegPose } from '@/lib/robotLegsModel';
 
-export { LEG_KINEMATICS, type LegPose };
-
 export interface RobotLegsProps {
   hipLRef: RefObject<THREE.Group | null>;
   kneeLRef: RefObject<THREE.Group | null>;

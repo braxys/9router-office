@@ -35,9 +35,3 @@ export interface AgentConfig {
    */
   identity: IdentityId;
 }
-
-export interface AgentTransition {
-  agentId: string;
-  status: AgentStatus;
-  source: 'manual' | 'auto' | 'system';
-}

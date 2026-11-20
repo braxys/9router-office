@@ -1,8 +1,5 @@
 import type { AgentConfig, AgentStatus } from './types';
 
-/** Radius of the ring of desks around the central hub. */
-export const AGENT_RING_RADIUS = 5.2;
-
 /**
  * Desks sit on a shallow arc across the back of the office so the camera sees
  * every robot's face and the central hub stays visible in front of them.
