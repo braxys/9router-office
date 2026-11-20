@@ -3,6 +3,8 @@
 import { create } from 'zustand';
 import { AGENT_CONFIGS } from '@/lib/agents';
 import { resolveIdentity } from '@/lib/providerIdentity';
+import { decayStatus } from '@/lib/statusResolution';
+import { acceptsLive, acceptsSimulation } from '@/lib/transport';
 import { useUiStore } from '@/store/useUiStore';
 import type { AgentStatus, AgentTelemetry } from '@/lib/types';
 
@@ -21,6 +23,17 @@ interface AgentStore {
   selectedAgentId: string;
   simulationMode: boolean;
   /**
+   * The transport brake, independent of `simulationMode`.
+   *
+   * `simulationMode` picks which source owns the roster; this stops both. It was
+   * a mistake to reuse one boolean for both jobs: "Pause" then swapped sources
+   * instead of stopping anything, so the office kept moving and the button read
+   * as broken. A source change must never clear this — a failed poll flips
+   * `simulationMode` to fall back to the mock, and unpausing there would restart
+   * the office behind the user's back.
+   */
+  paused: boolean;
+  /**
    * `broadcast` belongs to the store, not to a component: the mood grid is
    * rendered by both `SimulationPanel` (lg+) and `ControlDock` (<lg), and a
    * per-instance copy let the two disagree about who a trigger was aimed at.
@@ -30,6 +43,7 @@ interface AgentStore {
   eventCounter: number;
   selectAgent: (id: string) => void;
   setSimulationMode: (enabled: boolean) => void;
+  setPaused: (paused: boolean) => void;
   toggleBroadcast: () => void;
   /**
    * The single mood-trigger path: the grid buttons and the 1..4 keyboard
@@ -54,15 +68,31 @@ interface AgentStore {
    * is currently observing.
    */
   clearErrors: () => void;
-  tick: (now: number) => void;
+  /**
+   * Advance the roster clock.
+   *
+   * One entry point for both sources, because both need the same brake:
+   *   - simulation owns the roster -> drift the mock metrics (`nextTelemetry`)
+   *   - the live feed owns it      -> age each label against its `updatedAt`,
+   *     so a STREAMING label can never outlive the request it describes even if
+   *     the next poll never arrives
+   *
+   * No-op while `paused`: that is what makes the transport button a real brake.
+   *
+   * Takes no clock argument on purpose. It used to receive the render loop's
+   * `performance.now()`, while `updatedAt` is stamped with `Date.now()` — two
+   * different origins, so every age came out negative and the decay never ran.
+   * Reading the clock here keeps both sides in the same domain.
+   */
+  tick: () => void;
   /**
    * Replace the agent roster with a live 9Router snapshot.
    * Additive: touches only `agents` and `selectedAgentId`. Simulation actions
    * (`setStatus`, `setAllStatuses`, `cycleAll`, `resetTelemetry`, `tick`) keep
    * working unchanged on whatever roster is present.
    *
-   * No-op while `simulationMode` is on: a manual demo must not be overwritten
-   * by the next 1.5 s poll.
+   * No-op while `simulationMode` is on (a manual demo must not be overwritten by
+   * the next 1.5 s poll) and no-op while `paused` (a frozen office stays frozen).
    */
   applyLiveTelemetry: (agents: AgentTelemetry[]) => void;
 }
@@ -203,6 +233,7 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
   agents: buildInitialAgents(),
   selectedAgentId: AGENT_CONFIGS[0].id,
   simulationMode: true,
+  paused: false,
   broadcast: false,
   transitions: [],
   eventCounter: 0,
@@ -213,7 +244,14 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     }
   },
 
-  setSimulationMode: (enabled) => set({ simulationMode: enabled }),
+  setSimulationMode: (enabled) => {
+    // Deliberately does not touch `paused`: a failed poll flips this to fall
+    // back to the mock, and clearing the brake there would restart the office
+    // while the user believes it is frozen.
+    set({ simulationMode: enabled });
+  },
+
+  setPaused: (paused) => set({ paused }),
 
   toggleBroadcast: () => set((state) => ({ broadcast: !state.broadcast })),
 
@@ -267,7 +305,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       eventCounter: counter,
       agents: state.agents.map((agent) =>
         agent.id === agentId
-          ? { ...agent, status, ...metricsForStatus(status), updatedAt: now }
+          ? {
+              ...agent,
+              status,
+              ...metricsForStatus(status),
+              updatedAt: now,
+              // A manual mood replaces the measurement, so the label becomes
+              // deliberate and stops expiring. Clearing this is what lets the
+              // demo keep a chosen STREAMING indefinitely.
+              origin: undefined,
+            }
           : agent,
       ),
       transitions: [entry, ...state.transitions].slice(0, 24),
@@ -300,22 +347,59 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       };
     }),
 
-  tick: (now) => {
-    if (!get().simulationMode) return;
-    set((state) => ({
-      agents: state.agents.map((agent) => nextTelemetry(agent, now)),
-    }));
+  tick: () => {
+    const state = get();
+    if (!acceptsSimulation(state) && !acceptsLive(state)) return;
+
+    // One epoch read for both branches: `updatedAt` is stamped with `Date.now()`
+    // everywhere (here and in `routerAdapter`), so a caller-supplied clock from a
+    // different origin would silently disable the decay below.
+    const now = Date.now();
+    // The demo drifts only the robots it actually owns (see `origin`).
+    const drifting = acceptsSimulation(state);
+
+    let changed = false;
+    const next = state.agents.map((agent) => {
+      // A live label is a measurement, so it expires on its own schedule no
+      // matter who owns the roster now. This has to come first: an outage flips
+      // the roster to the demo while keeping the last live labels on screen, and
+      // a mood click claims the demo for one robot while the rest still carry
+      // live ones. Drifting those refreshed `updatedAt` forever, so a finished
+      // session kept reporting STREAMING and kept earning tokens.
+      if (agent.origin === 'live') {
+        const aged = decayStatus(agent.status, Math.max(0, now - agent.updatedAt));
+        if (aged === agent.status) return agent;
+        changed = true;
+        // `updatedAt` is deliberately left alone: re-stamping it would restart
+        // the clock and hand the label another full window on every tick.
+        return { ...agent, status: aged, ...metricsForStatus(aged) };
+      }
+
+      if (!drifting) return agent;
+      changed = true;
+      return nextTelemetry(agent, now);
+    });
+
+    // Same object when nothing moved, so this never notifies for no reason.
+    if (changed) set({ agents: next });
   },
 
   applyLiveTelemetry: (agents) => {
     if (agents.length === 0) return;
-    // Manual Simulation Mode owns the roster; a poll must never overwrite it.
-    if (get().simulationMode) return;
+    // A manual demo or a paused office owns the roster; a poll must never
+    // overwrite either one.
+    if (!acceptsLive(get())) return;
     set((state) => {
       // Keep the user's selection when that provider is still on stage.
       const selectionStillValid = agents.some((agent) => agent.id === state.selectedAgentId);
       return {
-        agents,
+        // Stamped here because this is the boundary that defines a live
+        // measurement: whatever enters through this action came from the feed and
+        // must expire on its own schedule. Stamping in the adapter instead would
+        // leave any other producer of a snapshot unmarked.
+        agents: agents.map((agent) =>
+          agent.origin === 'live' ? agent : { ...agent, origin: 'live' as const },
+        ),
         selectedAgentId: selectionStillValid ? state.selectedAgentId : agents[0].id,
       };
     });

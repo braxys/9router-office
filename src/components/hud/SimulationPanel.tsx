@@ -4,6 +4,7 @@ import { ChevronsRight, Monitor, Pause, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useAgentStore } from '@/store/useAgentStore';
 import { useUiStore } from '@/store/useUiStore';
+import { transportView } from '@/lib/transport';
 import { playClick, playConfirm, playToggle } from '@/lib/audio';
 import { cn } from '@/lib/format';
 import { CameraMenu } from './CameraMenu';
@@ -32,10 +33,13 @@ import { PANEL_RAIL_WIDTH, PANEL_WIDTH } from '@/lib/hudLayout';
  */
 export function SimulationPanel() {
   const simulationMode = useAgentStore((s) => s.simulationMode);
+  const paused = useAgentStore((s) => s.paused);
+  const setPaused = useAgentStore((s) => s.setPaused);
   const setSimulationMode = useAgentStore((s) => s.setSimulationMode);
   const resetTelemetry = useAgentStore((s) => s.resetTelemetry);
   const collapsed = useUiStore((s) => s.panelCollapsed);
   const togglePanelCollapsed = useUiStore((s) => s.togglePanelCollapsed);
+  const transport = transportView({ paused, simulationMode });
 
   // The button that was pressed unmounts when the panel folds, so focus falls
   // back to <body> and a keyboard user has to tab through the whole HUD to find
@@ -114,29 +118,33 @@ export function SimulationPanel() {
           <button
             type="button"
             onClick={() => {
-              setSimulationMode(!simulationMode);
+              // The transport brake, not a source switch: this stops both the
+              // live feed and the mock tick, so the office actually freezes.
+              setPaused(!paused);
               playToggle();
             }}
-            aria-pressed={simulationMode}
+            aria-pressed={paused}
             className={cn(
               'toy-btn flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 px-3 text-[12px] font-bold',
-              simulationMode
+              paused
                 ? 'border-candy-mint/50 bg-candy-mint/15 text-[#2f8f6d]'
                 : 'text-ink',
             )}
           >
-            {simulationMode ? (
-              <Pause className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
-            ) : (
+            {paused ? (
               <Play className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
+            ) : (
+              <Pause className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
             )}
-            {simulationMode ? 'Pause' : 'Resume'}
+            {transport.action}
           </button>
 
           <button
             type="button"
             onClick={() => {
-              // Reset restores the simulation roster; claim the mode first.
+              // Reset restores the simulation roster; claim the demo source
+              // first, and release the brake so the reset is visible.
+              setPaused(false);
               setSimulationMode(true);
               resetTelemetry();
               playConfirm();

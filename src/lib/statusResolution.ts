@@ -18,10 +18,15 @@
 
 import type { AgentStatus } from './types';
 
-/** A request this recent means the provider is actively streaming. */
+/**
+ * A completion this recent can still belong to a stream that is running now.
+ *
+ * `usageHistory` is written when a request *finishes*, so recency alone proves a
+ * request ended, not that another is in flight. See `resolveStatus`.
+ */
 export const STREAMING_MS = 4_000;
 
-/** A request this recent means the provider is still working on something. */
+/** A completion this recent means the provider is still working on something. */
 export const THINKING_MS = 25_000;
 
 export interface ConnectionHealth {
@@ -178,12 +183,53 @@ export function resolveStatus(
   msSinceLast: number,
   health: ConnectionHealth,
   hasTraffic: boolean,
+  /**
+   * How many requests completed inside `STREAMING_MS`.
+   *
+   * This is the difference between "a request just finished" and "requests are
+   * arriving back to back". 9Router writes a `usageHistory` row only on
+   * completion — there is no in-flight row, `requestDetails` is never populated
+   * and every `status` is `"ok"` — so one fresh row is the *end* of a stream.
+   * Reporting it as STREAMING is what made a finished session keep claiming it
+   * was streaming. Two or more completions inside the window is the weakest
+   * honest evidence that the provider is still being asked to work.
+   *
+   * Defaults to 2 so callers that do not measure the window keep the strict
+   * rule; pass the real count when it is known.
+   */
+  completionsInWindow = 2,
 ): AgentStatus {
   if (!hasTraffic) return 'IDLE';
-  if (msSinceLast < STREAMING_MS) return 'STREAMING';
+  if (msSinceLast < STREAMING_MS && completionsInWindow >= 2) return 'STREAMING';
   if (msSinceLast < THINKING_MS) return 'THINKING';
   if (isExhausted(health)) return 'ERROR';
   return 'IDLE';
+}
+
+/**
+ * Age a live status forward until it matches the snapshot's age.
+ *
+ * A live label is a statement about *now*, but `applyLiveTelemetry` only writes
+ * a new one when the next poll lands. Between polls — and for as long as the
+ * feed is unavailable — the roster keeps whatever it was last told, so a
+ * STREAMING label could outlive its request indefinitely. `tick` runs this on
+ * the live roster to make every label expire on its own.
+ *
+ * Only the two time-based labels decay. `ERROR` describes a provider with
+ * nothing left to serve, which stays true until 9Router clears the flag, and
+ * `IDLE` is already the floor. Simulation statuses never pass through here:
+ * a manually chosen mood is deliberate and must not fade.
+ */
+export function decayStatus(status: AgentStatus, msSinceUpdate: number): AgentStatus {
+  if (status === 'STREAMING') {
+    if (msSinceUpdate < STREAMING_MS) return 'STREAMING';
+    if (msSinceUpdate < THINKING_MS) return 'THINKING';
+    return 'IDLE';
+  }
+  if (status === 'THINKING') {
+    return msSinceUpdate < THINKING_MS ? 'THINKING' : 'IDLE';
+  }
+  return status;
 }
 
 /* -------------------------------------------------------------------------- */

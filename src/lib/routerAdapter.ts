@@ -35,6 +35,7 @@ import {
   isExhausted,
   resolveStatus,
   summariseConnections,
+  STREAMING_MS,
   type ConnectionFlag,
   type ConnectionRowLike,
 } from './statusResolution';
@@ -325,12 +326,17 @@ export async function readTelemetrySnapshot(): Promise<TelemetrySnapshot> {
       now,
     );
 
-    const rates = new Map<string, { tokens: number; timestamps: number[] }>();
+    const rates = new Map<string, { tokens: number; timestamps: number[]; recent: number }>();
     for (const row of recent) {
       if (!selected.has(row.provider)) continue;
-      const entry = rates.get(row.provider) ?? { tokens: 0, timestamps: [] };
+      const entry = rates.get(row.provider) ?? { tokens: 0, timestamps: [], recent: 0 };
       entry.tokens += toNumber(row.completionTokens);
-      entry.timestamps.push(toMs(row.timestamp));
+      const at = toMs(row.timestamp);
+      entry.timestamps.push(at);
+      // Completions inside the streaming window: the only honest evidence that
+      // a provider is still being asked to work. A single row proves one request
+      // ENDED, which is why it cannot mean STREAMING on its own.
+      if (now - at < STREAMING_MS) entry.recent += 1;
       rates.set(row.provider, entry);
     }
 
@@ -340,7 +346,7 @@ export async function readTelemetrySnapshot(): Promise<TelemetrySnapshot> {
       const lastAt = toMs(row.lastAt);
       const msSinceLast = lastAt > 0 ? Math.max(0, now - lastAt) : Number.POSITIVE_INFINITY;
 
-      const status = resolveStatus(msSinceLast, providerHealth, row.requests > 0);
+      const status = resolveStatus(msSinceLast, providerHealth, row.requests > 0, rate?.recent ?? 0);
 
       // The bubble is reserved for a provider that has nothing left to serve.
       // A partial outage (some accounts down, at least one still usable) is

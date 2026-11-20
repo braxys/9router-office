@@ -100,6 +100,26 @@ that the robots send parcels to.
 - **Mode ownership:** manual triggers and `Reset` claim Simulation Mode first, and
   `applyLiveTelemetry` no-ops while it is on, so a 1.5 s poll can never erase a live demo. Only an
   outage-initiated pause auto-resumes on reconnect.
+- **The transport brake is separate from the source.** `paused` stops BOTH the live feed and the
+  mock tick; `simulationMode` only picks which source owns the roster. They were once one boolean,
+  which made "Pause" swap sources instead of stopping anything — the office kept moving and the
+  button read as broken. Rules live in `src/lib/transport.ts` (`npm run transport:test`), and no
+  mode change may clear `paused`: a failed poll flips `simulationMode`, and unpausing there would
+  restart the office behind the user's back.
+- **A live status label must never latch.** `tick` ages live statuses with `decayStatus`, so
+  `STREAMING` expires even when no further poll arrives. `STREAMING` additionally requires two
+  completions inside `STREAMING_MS`, because `usageHistory` is written only when a request
+  *finishes* — one fresh row is the end of a stream, not proof of a running one.
+- **Provenance is per agent, not per roster.** `AgentTelemetry.origin === 'live'` marks a status as
+  a *measurement*, so `tick` ages it even after the demo takes over — an outage keeps the last live
+  labels on screen, and one mood click claims the demo for a single robot while the others still
+  carry live ones. `applyLiveTelemetry` stamps the mark at the store boundary, and a manual mood
+  clears it. Without this the mock tick refreshed `updatedAt` on live labels forever and even added
+  tokens, which is exactly how a finished session kept reporting `STREAMING`.
+- **`tick` reads its own clock.** It takes no `now` argument: `updatedAt` is a `Date.now()` epoch
+  stamp, and the render loop passes `performance.now()`, so a caller-supplied clock silently made
+  every age negative and disabled the decay. `npm run store:test` guards this; the pure rule tests
+  cannot, because they never run the wiring.
 - Rendering must stay smooth on integrated GPUs (iGPU) in thin laptops; dynamic FPS throttle
   keeps frame rate at 30 FPS when all idle and ~28–30 FPS when active or on a camera flight, and pauses
   entirely when the tab is hidden.

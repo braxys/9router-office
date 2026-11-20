@@ -1002,14 +1002,19 @@ export function Scene() {
 
 /**
  * Drives the mock telemetry tick without re-rendering React.
+ *
+ * The throttle uses the render loop's `performance.now()`, but the store reads
+ * its own `Date.now()` for the actual update: `updatedAt` is an epoch stamp, so
+ * handing this loop's clock to the store would put the two on different
+ * origins and break every age comparison.
  */
-function SimulationClock({ onTick }: { onTick: (now: number) => void }) {
+function SimulationClock({ onTick }: { onTick: () => void }) {
   const last = useRef(0);
   useFrame(() => {
     const now = performance.now();
     if (now - last.current > 500) {
       last.current = now;
-      onTick(now);
+      onTick();
     }
   });
   return null;

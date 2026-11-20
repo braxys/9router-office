@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import os from 'node:os';
 import {
+  STREAMING_MS,
   describeError,
   emptyHealth,
   isExhausted,
@@ -63,6 +64,19 @@ for (const r of db
   stats.set(r.provider, { last: r.last, n: r.n });
 }
 
+// Completions inside the streaming window: `resolveStatus` needs this to tell a
+// stream that is still running from one that just finished.
+const streamingCutoff = new Date(now - STREAMING_MS).toISOString();
+const bursts = new Map();
+for (const r of db
+  .prepare(
+    `SELECT provider, COUNT(*) AS n
+       FROM usageHistory WHERE timestamp >= ? GROUP BY provider`,
+  )
+  .all(streamingCutoff)) {
+  bursts.set(r.provider, r.n);
+}
+
 const nonOk = new Map();
 for (const r of db
   .prepare(`SELECT provider, COUNT(*) AS n FROM usageHistory WHERE status <> 'ok' GROUP BY provider`)
@@ -73,6 +87,7 @@ for (const r of db
 console.log(`db  : ${dbPath}`);
 console.log(`now : ${new Date(now).toISOString()}`);
 console.log('rule: fresh traffic wins; connection flags decide only once the provider is quiet');
+console.log('      STREAMING needs >= 2 completions inside the window (a finished request is not a live one)');
 console.log('      paused accounts (isActive = 0) are excluded from the counts');
 console.log('      ERROR (and the bubble) only when every usable account is down\n');
 
@@ -81,7 +96,8 @@ for (const p of [...health.keys()].sort()) {
   const stat = stats.get(p);
   const lastAt = stat?.last ? Date.parse(stat.last) : 0;
   const msSince = lastAt > 0 ? now - lastAt : Number.POSITIVE_INFINITY;
-  const status = resolveStatus(msSince, h, (stat?.n ?? 0) > 0);
+  const recent = bursts.get(p) ?? 0;
+  const status = resolveStatus(msSince, h, (stat?.n ?? 0) > 0, recent);
   const exhausted = isExhausted(h);
   // The app only builds a bubble for an exhausted provider, so mirror that
   // gate here — printing a message for a partial outage would not match what
@@ -92,6 +108,7 @@ for (const p of [...health.keys()].sort()) {
   console.log(
     `${p.padEnd(16)} ${status.padEnd(9)} usable=${h.total} down=${h.down}` +
       `  last request ${age}` +
+      `  completions<${STREAMING_MS / 1000}s: ${recent}` +
       `  non-ok rows: ${nonOk.get(p) ?? 0}` +
       `${err ? `  | ${err}` : ''}`,
   );

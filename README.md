@@ -81,6 +81,8 @@ npm run typecheck      # tsc --noEmit
 npm run lint           # eslint, zero warnings tolerated
 npm run identity:test  # provider identity truth table (no browser)
 npm run status:test    # provider status truth table (no browser)
+npm run transport:test # pause/source rules (no browser)
+npm run store:test     # the real store: brake, status decay, provenance (no browser)
 npm run roam:test      # idle-roam state machine (no browser)
 npm run layout:unit    # HUD geometry, including the collapsed rail (no browser)
 npm run build:model    # regenerate public/models/worker-robot.glb from robotModel.ts

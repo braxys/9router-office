@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useAgentStore } from '@/store/useAgentStore';
+import { acceptsLive } from '@/lib/transport';
 import type { AgentTelemetry } from '@/lib/types';
 
 /** How often the browser asks the server for a fresh snapshot. */
@@ -45,12 +46,14 @@ export function TelemetryBridge() {
     const handleConnected = (agents: AgentTelemetry[]) => {
       if (firstPoll || autoPaused) {
         autoPaused = false;
+        // Claim the live source. Does not clear `paused`, so a frozen office
+        // stays frozen even though the feed came back.
         setSimulationMode(false);
       }
       firstPoll = false;
 
-      // A user-chosen Simulation Mode owns the roster; leave it untouched.
-      if (!useAgentStore.getState().simulationMode) {
+      // A user-chosen demo or a paused office owns the roster; leave it alone.
+      if (acceptsLive(useAgentStore.getState())) {
         applyLiveTelemetry(agents);
       }
     };
@@ -58,13 +61,15 @@ export function TelemetryBridge() {
     const handleDisconnected = () => {
       firstPoll = false;
       // Only take over when the feed was actually live; a manual demo stays.
-      if (!useAgentStore.getState().simulationMode) {
+      if (acceptsLive(useAgentStore.getState())) {
         autoPaused = true;
         // The roster is kept so the office does not go blank, but its failure
         // text came from a database we can no longer read. Simulation keeps an
         // ERROR robot in ERROR (that is a deliberate demo), so without this a
         // live bubble would sit there for the rest of the session.
         clearErrors();
+        // Fall back to the mock source. This deliberately leaves `paused`
+        // alone: if the user froze the office, a failed poll must not restart it.
         setSimulationMode(true);
       }
     };

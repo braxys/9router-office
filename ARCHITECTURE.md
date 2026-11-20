@@ -194,13 +194,24 @@ scripts/build-robot-model.mjs        `npm run build:model` — writes both files
 scripts/identity-rules.mjs           `npm run identity:test` — truth table for providerIdentity.ts
 scripts/identity-render.mjs          live-graph gate: shells, toppers, baked ball, role colours, pill clearance
 scripts/status-rules.mjs             `npm run status:test` — truth table for statusResolution.ts
+scripts/transport-rules.mjs          `npm run transport:test` — pause/source rules for transport.ts
+scripts/store-rules.mjs              `npm run store:test` — the real store: brake, decay, provenance
+scripts/ts-alias-{loader,register}.mjs  let Node import `@/…` + extensionless TS for store-rules.mjs
 scripts/explain-status.mjs           `npm run status:live` — shipping rules vs. the live database
 ```
 
 ## 5. State Management
-- **`useAgentStore`** owns `agents[]`, `selectedAgentId`, `simulationMode`, `transitions[]` and
-  `eventCounter`, plus the actions `selectAgent`, `setSimulationMode`, `setStatus`,
+- **`useAgentStore`** owns `agents[]`, `selectedAgentId`, `simulationMode`, `paused`, `transitions[]`
+  and `eventCounter`, plus the actions `selectAgent`, `setSimulationMode`, `setPaused`, `setStatus`,
   `setAllStatuses`, `cycleAll`, `resetTelemetry`, `tick` and `applyLiveTelemetry`.
+- **`paused` is a brake, `simulationMode` is a source.** `paused` stops the live feed *and* the mock
+  tick; `simulationMode` only decides which of the two owns the roster. They were once one flag,
+  which made "Pause" swap sources instead of stopping anything. No mode change may clear `paused`,
+  because a failed poll flips `simulationMode` and unpausing there would restart a frozen office.
+- **`AgentTelemetry.origin` records provenance.** `'live'` marks a status as a *measurement*, so
+  `tick` ages it with `decayStatus` even after the demo takes the roster. Without it the mock tick
+  refreshed `updatedAt` on live labels forever and even added tokens, so a finished session kept
+  reporting `STREAMING`.
 - **Live telemetry:** `TelemetryBridge` (mounted once by `CommandCenter`) polls `/api/telemetry`
   every 1.5 s while the tab is visible and calls `applyLiveTelemetry(agents)`, which swaps the
   roster without touching the simulation actions. The first successful poll turns Simulation Mode
@@ -308,12 +319,22 @@ scripts/explain-status.mjs           `npm run status:live` — shipping rules vs
   window is empty), recent rows for tokens/second and latency proxy, today's `usageDaily` rollup
   for token totals, and `providerConnections` for health.
 - **Status mapping** (implemented in `src/lib/statusResolution.ts`, tested by `npm run status:test`):
-  no traffic in the window → `IDLE`; last request < 4 s → `STREAMING`; < 25 s → `THINKING`;
-  every *usable* connection `unavailable` → `ERROR`; otherwise `IDLE`. There is no fifth status.
-- **Why traffic outranks the flags:** `usageHistory` is written only after a request succeeded, so
-  a 1-second-old row proves the provider is serving. `providerConnections` describes the accounts
-  9Router is *not* using. Ranking the flags first made a provider with 2/3 healthy accounts look
-  degraded while it was mid-stream. Flags now decide only once the provider goes quiet.
+  no traffic in the window → `IDLE`; **two or more** completions inside 4 s → `STREAMING`; one
+  completion inside 25 s → `THINKING`; every *usable* connection `unavailable` → `ERROR`;
+  otherwise `IDLE`. There is no fifth status.
+- **Why `STREAMING` needs two completions, not one:** `usageHistory` is written when a request
+  *finishes*, and 9Router keeps no in-flight row (`requestDetails` is never populated and every
+  `status` is `"ok"`), so a single fresh row is the *end* of a stream. Treating it as proof of an
+  ongoing one made a finished session keep claiming it was streaming. Two completions inside the
+  window is the weakest honest evidence that the provider is still being asked to work.
+- **Why traffic outranks the flags:** a fresh row proves the provider is serving. `providerConnections`
+  describes the accounts 9Router is *not* using. Ranking the flags first made a provider with 2/3
+  healthy accounts look degraded while it was mid-stream. Flags now decide only once the provider
+  goes quiet.
+- **Live labels cannot latch:** `tick` ages every live status against the snapshot that produced it
+  (`decayStatus`), so `STREAMING` → `THINKING` → `IDLE` on its own even if the next poll never
+  arrives. `ERROR` is a fact about capacity, not recency, so it does not decay. Simulation statuses
+  never decay: a manually chosen mood is deliberate.
 - **`ERROR` requires zero usable accounts.** A partial outage keeps the provider on its real
   activity status and shows no bubble either — `routerAdapter` only sets `lastError` when
   `down === total && total > 0`. This keeps the label honest — "this provider cannot serve" —
@@ -378,7 +399,17 @@ scripts/readme-shots.mjs  captures the README screenshots into docs/screenshots/
 scripts/build-robot-model.mjs  regenerates public/models/worker-robot.glb (+ meta) from robotModel.ts
 scripts/identity-rules.mjs     truth table for providerIdentity.ts (npm run identity:test)
 scripts/identity-render.mjs    live-graph render gate for the per-provider identity (42 assertions)
+scripts/status-rules.mjs       truth table for statusResolution.ts (npm run status:test)
+scripts/transport-rules.mjs    pause/source truth table for transport.ts (npm run transport:test)
+scripts/store-rules.mjs        drives the real store: brake, decay, provenance (npm run store:test)
 ```
+
+`store-rules.mjs` exists because the pure rule tests cannot see the *wiring*, which is where both
+reported bugs lived: a pause flag that was really a source switch, and a decay that compared
+`performance.now()` against an epoch `updatedAt` so no age was ever positive. It imports the real
+Zustand store through `ts-alias-register.mjs` (which teaches Node the `@/…` alias and extensionless
+relative imports), then asserts on the composed behaviour. Both regressions were re-introduced
+deliberately to confirm the test fails when they are, and it does.
 
 `identity-render.mjs` answers a question a screenshot cannot: *is a shell authored in the part
 tables actually mounted on the live three.js graph?* A colour swap looks identical in a PNG. It

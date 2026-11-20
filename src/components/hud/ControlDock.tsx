@@ -2,6 +2,7 @@
 
 import { Pause, Play, RotateCcw, Sparkles } from 'lucide-react';
 import { useAgentStore } from '@/store/useAgentStore';
+import { transportView } from '@/lib/transport';
 import { playConfirm, playToggle } from '@/lib/audio';
 import { cn } from '@/lib/format';
 import { CameraMenu } from './CameraMenu';
@@ -19,8 +20,11 @@ import { SoundToggle } from './SoundToggle';
  */
 export function ControlDock() {
   const simulationMode = useAgentStore((s) => s.simulationMode);
+  const paused = useAgentStore((s) => s.paused);
+  const setPaused = useAgentStore((s) => s.setPaused);
   const setSimulationMode = useAgentStore((s) => s.setSimulationMode);
   const resetTelemetry = useAgentStore((s) => s.resetTelemetry);
+  const transport = transportView({ paused, simulationMode });
 
   return (
     <section
@@ -33,14 +37,14 @@ export function ControlDock() {
           <span
             className={cn(
               'flex h-7 w-7 items-center justify-center rounded-xl',
-              simulationMode ? 'bg-candy-mint/20' : 'bg-card-soft',
+              paused ? 'bg-card-soft' : 'bg-candy-mint/20',
             )}
             aria-hidden
           >
             <Sparkles
               className={cn(
                 'h-4 w-4',
-                simulationMode ? 'text-candy-mint animate-toy-bob' : 'text-ink-dim',
+                paused ? 'text-ink-dim' : 'text-candy-mint animate-toy-bob',
               )}
               strokeWidth={2.4}
             />
@@ -49,9 +53,9 @@ export function ControlDock() {
             <h2 className="text-[13px] font-bold tracking-tight text-ink-strong">
               Simulation Mode
             </h2>
-            <p className="text-[11px] font-medium text-ink-dim">
-              {simulationMode ? 'Live mock telemetry' : 'Paused'}
-            </p>
+            {/* Reads straight from `transportView`, so this line can never claim
+                "Paused" while a source is still moving the robots. */}
+            <p className="text-[11px] font-medium text-ink-dim">{transport.status}</p>
           </div>
         </div>
 
@@ -68,29 +72,31 @@ export function ControlDock() {
           <button
             type="button"
             onClick={() => {
-              setSimulationMode(!simulationMode);
+              setPaused(!paused);
               playToggle();
             }}
-            aria-pressed={simulationMode}
+            aria-pressed={paused}
             className={cn(
               'toy-btn flex min-h-9 cursor-pointer items-center gap-1.5 px-3 text-[12px] font-bold',
-              simulationMode
+              paused
                 ? 'border-candy-mint/50 bg-candy-mint/15 text-[#2f8f6d]'
                 : 'text-ink',
             )}
           >
-            {simulationMode ? (
-              <Pause className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
-            ) : (
+            {paused ? (
               <Play className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
+            ) : (
+              <Pause className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
             )}
-            {simulationMode ? 'Pause' : 'Resume'}
+            {transport.action}
           </button>
 
           <button
             type="button"
             onClick={() => {
-              // Reset restores the simulation roster; claim the mode first.
+              // Reset restores the simulation roster; claim the demo source
+              // first, and release the brake so the reset is visible.
+              setPaused(false);
               setSimulationMode(true);
               resetTelemetry();
               playConfirm();

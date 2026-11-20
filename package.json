@@ -20,7 +20,9 @@
     "identity:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-render.mjs",
     "identity:render:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/identity-render.mjs --model",
     "status:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/explain-status.mjs",
-    "build:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-robot-model.mjs"
+    "build:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-robot-model.mjs",
+    "transport:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/transport-rules.mjs",
+    "store:test": "node --import ./scripts/ts-alias-register.mjs --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/store-rules.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",

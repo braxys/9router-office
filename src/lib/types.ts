@@ -18,6 +18,21 @@ export interface AgentTelemetry {
   latencyMs: number;
   lastError?: string;
   updatedAt: number;
+  /**
+   * Where the current `status` came from, when that matters.
+   *
+   * `'live'` means the label is a *measurement* taken from a 9Router snapshot,
+   * so it must expire on its own schedule. A manually chosen mood leaves this
+   * undefined: a demo status is deliberate and must never fade.
+   *
+   * The distinction has to be per agent, not per roster. Pressing one mood
+   * button claims the demo for a single robot while the others still carry live
+   * labels, and an outage flips the whole roster to the demo while keeping the
+   * last live labels on screen. Without this flag the mock tick treated those
+   * measurements as demo state, refreshing `updatedAt` forever and even adding
+   * tokens — which is how a finished session kept reporting `STREAMING`.
+   */
+  origin?: 'live';
 }
 
 export interface AgentConfig {

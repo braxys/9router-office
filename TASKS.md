@@ -119,11 +119,13 @@ Tables used:
   `backoffLevel`, `lastUsedAt`.
 
 Status mapping (implemented in `src/lib/statusResolution.ts`, asserted by
-`npm run status:test`): last request `<4s` → `STREAMING`; `<25s` → `THINKING`; every *usable*
-connection `unavailable` → `ERROR`; otherwise `IDLE`. Traffic is checked first because a
-`usageHistory` row only exists after a successful request — a provider with 2/3 healthy accounts
-that answered a second ago is working, whatever its flags say. Paused accounts (`isActive = 0`)
-are excluded from the counts. The top 4 providers by 24h request count take the 4 desks.
+`npm run status:test`): **two or more** completions within `<4s` → `STREAMING`; one completion
+within `<25s` → `THINKING`; every *usable* connection `unavailable` → `ERROR`; otherwise `IDLE`.
+`STREAMING` needs two completions because a `usageHistory` row only exists *after* a request
+finishes — 9Router keeps no in-flight row — so one fresh row is the end of a stream, not proof of
+a running one. Traffic still outranks the flags, because a provider with 2/3 healthy accounts that
+answered a second ago is working whatever its flags say. Paused accounts (`isActive = 0`) are
+excluded from the counts. The top 4 providers by 24h request count take the 4 desks.
 `tokensPerSecond` is completion tokens over a 30s window; `latencyMs` is the median inter-request
 gap (there is no latency column).
 
