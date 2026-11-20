@@ -431,6 +431,7 @@ export function WorkerRobot({
         hipRRef={hipR}
         kneeRRef={kneeR}
         accent={accentColor}
+        palette={identity.palette}
       />
 
       {/* ------------------------------ TORSO ------------------------------ */}

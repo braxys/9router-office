@@ -2,7 +2,7 @@
 
 import type { RefObject } from 'react';
 import * as THREE from 'three';
-import { ROBOT_COLORS, resolveRobotColor } from '@/lib/robotModel';
+import { ROBOT_COLORS, resolveRobotColor, type RobotPalette } from '@/lib/robotModel';
 import { LEG_KINEMATICS, type LegPose } from '@/lib/robotLegsModel';
 
 export { LEG_KINEMATICS, type LegPose };
@@ -15,6 +15,15 @@ export interface RobotLegsProps {
   kneeRRef: RefObject<THREE.Group | null>;
   footRRef?: RefObject<THREE.Mesh | null>;
   accent: string;
+  /**
+   * The identity's four brand roles, so the legs wear the same colours the
+   * spec assigns them: thigh `limb`, shin `extra`, foot `cream`.
+   *
+   * Without this the legs fall back to `darkenHex(accent)` and ignore a
+   * provider's declared `limb`/`extra` hexes — a four-colour logo would show
+   * two colours on its legs.
+   */
+  palette?: RobotPalette;
 }
 
 /**
@@ -29,32 +38,38 @@ export function RobotLegs({
   kneeRRef,
   footRRef,
   accent,
+  palette,
 }: RobotLegsProps) {
   const { hipPivotX, hipPivotY, thighLength, shinLength, footHeight } = LEG_KINEMATICS;
-  const limbColor = resolveRobotColor('limb', accent);
+  // The same three roles `ROBOT_PARTS` declares for these six meshes. Resolved
+  // once per render rather than per mesh, and through the identity palette so a
+  // provider's real brand colours reach the legs.
+  const thighColor = resolveRobotColor('limb', accent, palette);
+  const shinColor = resolveRobotColor('extra', accent, palette);
+  const footColor = ROBOT_COLORS.cream;
 
   return (
     <>
       {/* ---------- LEFT LEG ---------- */}
       <group ref={hipLRef} position={[-hipPivotX, hipPivotY, 0]}>
         {/* Thigh: drops along -Y from hip pivot */}
-        <mesh position={[0, -thighLength / 2, 0]}>
+        <mesh name="thighL" position={[0, -thighLength / 2, 0]}>
           <boxGeometry args={[0.2, thighLength, 0.2]} />
-          <meshLambertMaterial color={limbColor} />
+          <meshLambertMaterial color={thighColor} />
         </mesh>
 
         {/* Knee joint at bottom of thigh */}
         <group ref={kneeLRef} position={[0, -thighLength, 0]}>
           {/* Shin: drops along -Y from knee pivot */}
-          <mesh position={[0, -shinLength / 2, 0]}>
+          <mesh name="shinL" position={[0, -shinLength / 2, 0]}>
             <boxGeometry args={[0.18, shinLength, 0.18]} />
-            <meshLambertMaterial color={limbColor} />
+            <meshLambertMaterial color={shinColor} />
           </mesh>
 
           {/* Foot: flat at bottom of shin */}
-          <mesh ref={footLRef} position={[0, -shinLength - footHeight / 2, 0.05]}>
+          <mesh ref={footLRef} name="footL" position={[0, -shinLength - footHeight / 2, 0.05]}>
             <boxGeometry args={[0.21, footHeight, 0.28]} />
-            <meshLambertMaterial color={ROBOT_COLORS.cream} />
+            <meshLambertMaterial color={footColor} />
           </mesh>
         </group>
       </group>
@@ -62,23 +77,23 @@ export function RobotLegs({
       {/* ---------- RIGHT LEG ---------- */}
       <group ref={hipRRef} position={[hipPivotX, hipPivotY, 0]}>
         {/* Thigh: drops along -Y from hip pivot */}
-        <mesh position={[0, -thighLength / 2, 0]}>
+        <mesh name="thighR" position={[0, -thighLength / 2, 0]}>
           <boxGeometry args={[0.2, thighLength, 0.2]} />
-          <meshLambertMaterial color={limbColor} />
+          <meshLambertMaterial color={thighColor} />
         </mesh>
 
         {/* Knee joint at bottom of thigh */}
         <group ref={kneeRRef} position={[0, -thighLength, 0]}>
           {/* Shin: drops along -Y from knee pivot */}
-          <mesh position={[0, -shinLength / 2, 0]}>
+          <mesh name="shinR" position={[0, -shinLength / 2, 0]}>
             <boxGeometry args={[0.18, shinLength, 0.18]} />
-            <meshLambertMaterial color={limbColor} />
+            <meshLambertMaterial color={shinColor} />
           </mesh>
 
           {/* Foot: flat at bottom of shin */}
-          <mesh ref={footRRef} position={[0, -shinLength - footHeight / 2, 0.05]}>
+          <mesh ref={footRRef} name="footR" position={[0, -shinLength - footHeight / 2, 0.05]}>
             <boxGeometry args={[0.21, footHeight, 0.28]} />
-            <meshLambertMaterial color={ROBOT_COLORS.cream} />
+            <meshLambertMaterial color={footColor} />
           </mesh>
         </group>
       </group>
