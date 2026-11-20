@@ -1,66 +1,137 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 9Router 3D Spatial Agent HUD
 
-A 3D office where every provider reported by 9Router gets its own robot: one desk each, a comedic
-performance per status, and a body shaped like the provider — head crest, antenna topper, chest
-emblem and brand colour. Unknown providers fall back to the shared default body.
+A 3D observability dashboard for a local [9Router](https://9router.com) instance. Instead of charts,
+every AI provider configured in 9Router becomes a blocky worker robot sitting at its own desk in a
+bright, toy-like office diorama. The robots act out what the router is doing in real time — typing
+frantically while streaming, thinking with a wobbling antenna, slumping when a provider runs dry —
+and idle ones get up and wander around the office.
 
-## Getting Started
+Everything runs locally. No cloud services, no paid APIs, no external 3D assets.
 
-First, run the development server:
+![The office overview: four provider robots at their desks, the 9Router core hub in the middle, and the simulation panel on the right](docs/screenshots/overview.png)
+
+## What it does
+
+- **Live telemetry from 9Router.** `/api/telemetry` reads the router's local SQLite database
+  read-only and polls it into the client every 1.5 s. When 9Router is unreachable the HUD drops
+  back to Simulation Mode automatically, so the office is never empty.
+- **Per-provider robots.** Each provider gets a body shaped like its own logo — head crest, antenna
+  topper, chest emblem — painted with a four-role brand palette taken from its logo: `body`,
+  `limb`, `accent` and `extra`. Unknown providers fall back to the shared default body with a
+  hash-derived colour.
+- **Status as performance.** `IDLE`, `THINKING`, `STREAMING` and `ERROR` map to readable robot
+  comedy: chair sways, fast typing, parcel launches, cartoon smoke. `ERROR` means *nothing left to
+  serve* — every usable account for that provider is dead — and it raises a dismissible bubble with
+  the failure text and its absolute reset date. Partial degradation stays silent on purpose.
+- **Idle roaming.** Between tasks a robot stands up, walks to an office POI, inspects it, maybe
+  dances, then sprints back when work arrives. Pure state machine, no pathfinding library.
+- **Two bodies.** The procedural robot is the default; a generated `.glb` body is opt-in through
+  `?model=on` or the HUD toggle. Both are driven by the same animation channels.
+- **Built for integrated GPUs.** No real-time shadows, a demand-driven render loop throttled to
+  ~30 FPS, and a full pause when the tab is hidden.
+
+## Screenshots
+
+| Collapsed panel | Generated `.glb` body |
+| --- | --- |
+| ![The simulation panel folded into a 56px logo rail, with the office re-framed to use the released width](docs/screenshots/panel-collapsed.png) | ![The same office rendered with the generated .glb robot body instead of the procedural one](docs/screenshots/model-rig.png) |
+| The right panel folds into a 56px rail and the camera gives the office the freed width back. | `?model=on` swaps every bot to the generated `.glb` body. |
+
+## Quick start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001) with your browser to see the result. (`npm run dev`
-uses port 3001 because the 9Router telemetry API expects to be reached from the dashboard's origin.)
+Open <http://localhost:3001>. The dev script pins port 3001 because 9Router's telemetry API expects
+the dashboard on that origin.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The office works immediately in Simulation Mode. To show real data, run 9Router locally and point
+the app at its database — it is found automatically in the first location that exists:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Platform | Default path |
+| --- | --- |
+| Windows | `%APPDATA%/9router/db/data.sqlite` |
+| macOS | `~/Library/Application Support/9router/db/data.sqlite` |
+| Linux | `~/.config/9router/db/data.sqlite` |
+
+Set `NINEROUTER_DB_PATH` to override. The database is opened read-only, so the HUD never writes to
+your router's state.
+
+### URL parameters
+
+| Parameter | Effect |
+| --- | --- |
+| `?capture=1` | Keeps the WebGL drawing buffer and suppresses idle roaming, so screenshots and layout gates measure a deterministic scene. |
+| `?model=on` | Forces the generated `.glb` robot body. `?model=off` forces the procedural one. |
+
+### Keyboard
+
+`1`–`4` trigger the four manual moods for the selected robot. The dock also has broadcast-to-all,
+cycle, and reset.
 
 ## Checks
 
-```bash
-npm run typecheck     # tsc --noEmit
-npm run lint          # eslint
-npm run identity:test # provider identity truth table (no browser)
-npm run identity:render # per-part colour gate, procedural rig (needs dev server + Chrome on CDP 9223)
-npm run identity:render:model # per-part colour gate, .glb rig (same prerequisites)
-npm run status:test   # provider status truth table (no browser)
-npm run layout:unit   # HUD geometry truth table, incl. the collapsed rail (no browser)
-npm run build:model   # regenerate public/models/worker-robot.glb from robotModel.ts
-npm run smoke         # page-ready + console-error probe (needs Chrome on CDP 9223)
-npm run layout:test   # 15-viewport HUD layout gate (needs dev server + Chrome on CDP 9224)
-```
-
-`scripts/identity-render.mjs` is the render gate for the per-provider bots; it needs the dev server
-on port 3001 and Chrome headless on CDP 9223, and is worth running on both bodies:
+Everything below runs from the repo root. The unit gates need nothing but Node; the browser gates
+need a running app and Chrome with remote debugging enabled.
 
 ```bash
-npm run identity:render        # procedural rig (?capture=1)
-npm run identity:render:model  # .glb rig      (?capture=1&model=on)
+npm run typecheck      # tsc --noEmit
+npm run lint           # eslint, zero warnings tolerated
+npm run identity:test  # provider identity truth table (no browser)
+npm run status:test    # provider status truth table (no browser)
+npm run roam:test      # idle-roam state machine (no browser)
+npm run layout:unit    # HUD geometry, including the collapsed rail (no browser)
+npm run build:model    # regenerate public/models/worker-robot.glb from robotModel.ts
 ```
 
-See `ARCHITECTURE.md` for the data flow, the identity tables and what each gate actually proves.
+Browser gates — start the app, then launch Chrome headless with `--remote-debugging-port`:
 
-## Learn More
+```bash
+npm run smoke                 # page-ready + zero console errors        (CDP 9223)
+npm run identity:render       # per-part colour gate, procedural rig    (CDP 9223)
+npm run identity:render:model # per-part colour gate, .glb rig          (CDP 9223)
+npm run perf                  # frame-budget probe                       (CDP 9223)
+npm run layout:test           # 15-viewport HUD layout gate             (CDP 9224)
+```
 
-To learn more about Next.js, take a look at the following resources:
+The browser gates read `TARGET_URL`, so they can point at any port:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+TARGET_URL='http://localhost:3001/?capture=1' npm run identity:render
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`identity:render` is the gate worth understanding: it walks the live three.js scene graph and checks
+that every named part wears the exact colour its role resolves to, for every provider on stage. It
+is what catches a component that re-implements spec geometry and quietly drops the colour contract —
+a class of bug that unit tests on the tables cannot see.
 
-## Deploy on Vercel
+## Architecture
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The HUD is a Next.js 16 app: a single R3F canvas, a Zustand telemetry store as the source of truth, a
+separate presentation store for UI state, and a polling bridge that feeds live router data in without
+ever overwriting a manual demo.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/routerAdapter.ts` — reads 9Router's SQLite, resolves provider status and errors.
+- `src/lib/statusResolution.ts` — the pure status rules, shared by the server and the test gate.
+- `src/lib/providerIdentity.ts` — per-provider shells, toppers, emblems and four-role palettes.
+- `src/lib/robotModel.ts` — the single source of robot geometry, consumed by both the runtime and
+  the `.glb` generator.
+- `src/lib/idleRoamState.ts` — the pure roaming state machine.
+- `src/store/useAgentStore.ts` / `useUiStore.ts` — telemetry vs presentation, kept strictly apart.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full data flow, the identity tables, and what each
+gate proves. [`AGENTS.md`](AGENTS.md) carries the project constraints and phase history;
+[`TASKS.md`](TASKS.md) is the phase-by-phase log.
+
+## Generated assets
+
+`public/models/worker-robot.glb` is generated, not hand-modelled. `npm run build:model` rebuilds it
+from `src/lib/robotModel.ts` — the same numbers the procedural body uses — so the two bodies can
+never drift apart. The output is deterministic: rebuilding without changing the model yields a
+byte-identical file.
+
+## License
+
+No license file is included yet.
